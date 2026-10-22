@@ -17,7 +17,7 @@ if ((git ls-files -- 'backend/.env') -ne $null) { throw 'backend/.env ikut ter-t
 git commit -m "Initial commit: pre-order kantin kampus (PHP API + frontend)" 2>$null
 if ($LASTEXITCODE -ne 0) { "tidak ada perubahan baru untuk di-commit" }
 
-git remote remove origin 2>$null
+if ((git remote) -contains 'origin') { git remote remove origin }
 git remote add origin $url
 
 if (Get-Command gh -ErrorAction SilentlyContinue) { gh auth setup-git 2>$null }
