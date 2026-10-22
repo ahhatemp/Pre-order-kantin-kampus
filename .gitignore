@@ -1,0 +1,12 @@
+# secrets
+backend/.env
+
+# runtime artifacts
+backend/storage/ratelimit/*.json
+backend/storage/logs/
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini

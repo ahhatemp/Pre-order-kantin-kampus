@@ -1,0 +1,128 @@
+<?php
+require_once __DIR__ . '/../helpers.php';
+require_once __DIR__ . '/../auth.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../rate_limit.php';
+require_once __DIR__ . '/../services/order.php';
+
+function orders_create() {
+    $me = authenticate();
+
+    $config = require __DIR__ . '/../config.php';
+    rate_limit('order', $config['rate_limit_order'], 60, 'Terlalu banyak permintaan order. Tunggu 1 menit.');
+
+    $body = get_json_body();
+    $items = $body['items'] ?? null;
+    $pickupAt = $body['pickup_at'] ?? null;
+    $catatan = $body['catatan'] ?? null;
+
+    if (!is_array($items) || count($items) === 0) json_error('Pesanan harus berisi minimal 1 menu');
+    if (count($items) > 10) json_error('Maksimal 10 item dalam satu pesanan');
+
+    foreach ($items as $item) {
+        $menuId = is_array($item) ? ($item['menu_id'] ?? null) : null;
+        $quantity = is_array($item) ? ($item['quantity'] ?? null) : null;
+
+        if (!is_int($menuId) && !is_float($menuId)) json_error('menu_id harus berupa angka');
+        if (!is_int($quantity) && !is_float($quantity)) json_error('quantity harus berupa angka');
+        if ($quantity < 1 || $quantity > 50) json_error('quantity harus antara 1 sampai 50');
+    }
+
+    if (!$pickupAt) json_error('Waktu pengambilan wajib diisi');
+    $pickupTs = is_string($pickupAt) ? strtotime($pickupAt) : false;
+    if ($pickupTs === false) json_error('Format waktu pengambilan tidak valid');
+
+    if ($catatan !== null && !is_string($catatan)) json_error('Catatan harus berupa teks');
+    if (is_string($catatan) && strlen($catatan) > 255) json_error('Catatan maksimal 255 karakter');
+
+    try {
+        $order = create_order_tx($me['id'], $items, date('Y-m-d H:i:s', $pickupTs), $catatan);
+        json_response($order, 201);
+    } catch (Exception $e) {
+        error_log('Create order error: ' . $e->getMessage());
+        json_error($e->getMessage() ?: 'Gagal membuat pesanan', 400);
+    }
+}
+
+function orders_my() {
+    $me = authenticate();
+    try {
+        $pdo = get_db_connection();
+        $stmt = $pdo->prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC');
+        $stmt->execute([$me['id']]);
+        $orders = $stmt->fetchAll();
+        if (!$orders) json_response([]);
+
+        // Sertakan item pesanan supaya klien tidak perlu fetch satu per order.
+        $ids = array_map(fn($o) => (int)$o['id'], $orders);
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $itemsStmt = $pdo->prepare(
+            "SELECT oi.order_id, oi.quantity, oi.price_at_order, m.nama
+             FROM order_items oi
+             JOIN menus m ON m.id = oi.menu_id
+             WHERE oi.order_id IN ($placeholders)
+             ORDER BY oi.id"
+        );
+        $itemsStmt->execute($ids);
+
+        $itemsByOrder = [];
+        foreach ($itemsStmt->fetchAll() as $item) {
+            $itemsByOrder[(int)$item['order_id']][] = [
+                'name' => $item['nama'],
+                'qty' => (int)$item['quantity'],
+                'price' => (int)$item['price_at_order'],
+            ];
+        }
+
+        foreach ($orders as &$o) {
+            $o['id'] = (int)$o['id'];
+            $o['user_id'] = (int)$o['user_id'];
+            $o['total_price'] = (int)$o['total_price'];
+            $o['items'] = $itemsByOrder[$o['id']] ?? [];
+        }
+        json_response($orders);
+    } catch (PDOException $e) {
+        json_error('Gagal mengambil riwayat pesanan', 500);
+    }
+}
+
+function orders_detail($id) {
+    $me = authenticate();
+    try {
+        $pdo = get_db_connection();
+        $stmt = $pdo->prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?');
+        $stmt->execute([$id, $me['id']]);
+        $order = $stmt->fetch();
+        if (!$order) json_error('Pesanan tidak ditemukan', 404);
+
+        $items = $pdo->prepare(
+            'SELECT oi.*, m.nama
+             FROM order_items oi
+             JOIN menus m ON oi.menu_id = m.id
+             WHERE oi.order_id = ?'
+        );
+        $items->execute([$id]);
+
+        $order['items'] = $items->fetchAll();
+        json_response(cast_orders([$order])[0]);
+    } catch (PDOException $e) {
+        json_error('Gagal mengambil detail pesanan', 500);
+    }
+}
+
+// mysql2 mengirim angka sebagai number, PDO sebagai string -> samakan tipe.
+function cast_orders(array $orders) {
+    foreach ($orders as &$o) {
+        foreach (['id', 'user_id', 'total_price'] as $k) {
+            if (isset($o[$k]) && $o[$k] !== null) $o[$k] = (int)$o[$k];
+        }
+        if (isset($o['items'])) {
+            foreach ($o['items'] as &$it) {
+                foreach (['id', 'order_id', 'menu_id', 'quantity', 'price_at_order'] as $k) {
+                    if (isset($it[$k]) && $it[$k] !== null) $it[$k] = (int)$it[$k];
+                }
+            }
+        }
+    }
+    return $orders;
+}

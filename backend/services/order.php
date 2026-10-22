@@ -1,0 +1,80 @@
+<?php
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/midtrans.php';
+
+// Pembuatan pesanan dalam satu transaksi: lock baris menu (anti oversell),
+// potong stok, simpan order + item, lalu buat token Midtrans.
+function create_order_tx($userId, array $items, $pickupAt, $catatan = null) {
+    // Agregasi item dengan menu_id sama agar tidak double-deduct stok
+    $merged = [];
+    foreach ($items as $item) {
+        $id = (int)$item['menu_id'];
+        $merged[$id] = ($merged[$id] ?? 0) + (int)$item['quantity'];
+    }
+
+    $pdo = get_db_connection();
+    $pdo->beginTransaction();
+
+    try {
+        $menuIds = array_keys($merged);
+        $placeholders = implode(',', array_fill(0, count($menuIds), '?'));
+        $stmt = $pdo->prepare("SELECT id, nama, harga, stok, is_active FROM menus WHERE id IN ($placeholders) FOR UPDATE");
+        $stmt->execute($menuIds);
+
+        $menuMap = [];
+        foreach ($stmt->fetchAll() as $row) $menuMap[(int)$row['id']] = $row;
+
+        $totalPrice = 0;
+        $orderItems = [];
+
+        foreach ($merged as $menuId => $quantity) {
+            $menu = $menuMap[$menuId] ?? null;
+            if (!$menu) throw new Exception("Menu ID {$menuId} tidak ditemukan");
+            if (!$menu['is_active']) throw new Exception("Menu \"{$menu['nama']}\" sedang tidak tersedia");
+            if ((int)$menu['stok'] < $quantity) {
+                throw new Exception("Stok untuk \"{$menu['nama']}\" tidak mencukupi (tersedia {$menu['stok']})");
+            }
+
+            $totalPrice += (int)$menu['harga'] * $quantity;
+            $orderItems[] = ['menu_id' => $menuId, 'quantity' => $quantity, 'price' => (int)$menu['harga']];
+
+            $deduct = $pdo->prepare('UPDATE menus SET stok = stok - ? WHERE id = ?');
+            $deduct->execute([$quantity, $menuId]);
+        }
+
+        $orderCode = 'ORD-' . substr((string)time(), -6) . '-' . random_int(100, 999);
+
+        $insertOrder = $pdo->prepare(
+            "INSERT INTO orders (order_code, user_id, total_price, pickup_at, catatan, status, expires_at)
+             VALUES (?, ?, ?, ?, ?, 'pending', DATE_ADD(NOW(), INTERVAL 10 MINUTE))"
+        );
+        $insertOrder->execute([$orderCode, $userId, $totalPrice, $pickupAt, $catatan ?: null]);
+        $orderId = (int)$pdo->lastInsertId();
+
+        $insertItem = $pdo->prepare('INSERT INTO order_items (order_id, menu_id, quantity, price_at_order) VALUES (?, ?, ?, ?)');
+        foreach ($orderItems as $oi) {
+            $insertItem->execute([$orderId, $oi['menu_id'], $oi['quantity'], $oi['price']]);
+        }
+
+        $snapToken = create_snap_token($orderCode, $totalPrice);
+        $updateToken = $pdo->prepare('UPDATE orders SET payment_token = ? WHERE id = ?');
+        $updateToken->execute([$snapToken, $orderId]);
+
+        $pdo->commit();
+
+        $stmtExp = $pdo->prepare('SELECT expires_at FROM orders WHERE id = ?');
+        $stmtExp->execute([$orderId]);
+        $expiresAt = $stmtExp->fetchColumn();
+
+        return [
+            'id' => $orderId,
+            'order_code' => $orderCode,
+            'total_price' => $totalPrice,
+            'payment_token' => $snapToken,
+            'expires_at' => $expiresAt,
+        ];
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $e;
+    }
+}

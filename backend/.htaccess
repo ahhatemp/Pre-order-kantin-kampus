@@ -1,0 +1,19 @@
+RewriteEngine On
+
+# Apache membuang header Authorization sebelum sampai ke PHP; salin ke env.
+RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# Arahkan semua request ke front controller API (file lain tidak boleh di-serve)
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^ api/index.php [L,QSA]
+
+# Blokir eksekusi langsung file .php selain front controller
+<IfModule mod_authz_core.c>
+  <FilesMatch "\.php$">
+    Require all denied
+  </FilesMatch>
+  <Files "index.php">
+    Require all granted
+  </Files>
+</IfModule>

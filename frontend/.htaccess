@@ -1,0 +1,6 @@
+# Aset demo sering berubah: jangan biarkan browser memakai versi lama.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html|js|css)$">
+    Header set Cache-Control "no-store"
+  </FilesMatch>
+</IfModule>
