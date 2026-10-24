@@ -86,7 +86,7 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 - **Input:** Email, password
 - **Proses:** Verifikasi kredensial, generate JWT HS256 berlaku 12 jam
 - **Output:** Token akses, redirect ke halaman menu
-- **Aturan:** Rate limit per IP: 5x login gagal dalam 10 menit akan diblokir sementara
+- **Aturan:** Email dan password wajib diisi; kredensial salah mengembalikan 401 tanpa pembatasan percobaan
 
 **FR-03: Login Admin**
 - **Input:** Email, password
@@ -214,7 +214,6 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 - HTTPS wajib semua traffic (di luar scope kode aplikasi)
 - JWT HS256 dengan expiry 12 jam
 - Role-based access control (mahasiswa/admin strict separation)
-- Brute-force protection: 5x login gagal per IP dalam 10 menit = diblokir sementara
 - Semua query memakai prepared statement PDO (placeholder `?`) untuk mencegah SQL injection
 - Pembuatan order dibungkus transaksi + `SELECT ... FOR UPDATE` untuk mencegah stok oversell
 - Webhook Midtrans divalidasi dengan `signature_key` dan `gross_amount`

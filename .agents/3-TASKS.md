@@ -37,7 +37,7 @@ Stack aktual: PHP native + PDO/MySQL, frontend HTML/CSS/JS tanpa build step, Mid
 ### T-04: API auth + role guard — Selesai
 - **Bukti:** `backend/controllers/auth.php`, `backend/auth.php`, `backend/rate_limit.php`.
 - **Fitur:** register (validasi email/NIM/password), login (JWT 12 jam), `GET /api/auth/me`,
-  `require_role('admin')`, rate limit login 5x/10 menit per IP.
+  `require_role('admin')`.
 
 ### T-05: Reset password via email — Ditunda ke v2
 - **Alasan:** belum ada layanan email yang ditentukan; tidak termasuk scope v1.
@@ -124,7 +124,7 @@ Stack aktual: PHP native + PDO/MySQL, frontend HTML/CSS/JS tanpa build step, Mid
   aktif menu, refresh 30 detik.
 
 ### T-18: Security & performance — Sebagian
-- **Sudah:** rate limit auth/order, JWT + role guard, prepared statement, transaksi anti-oversell,
+- **Sudah:** rate limit order, JWT + role guard, prepared statement, transaksi anti-oversell,
   proteksi file sensitif via `.htaccess`, uji mandiri JWT/rate limiter.
 - **Belum:** load test konkurensi, audit responsive 320/768/1024 px, pengukuran page load,
   test end-to-end, pembatasan CORS produksi, penggantian `JWT_SECRET` default.

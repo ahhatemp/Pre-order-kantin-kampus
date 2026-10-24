@@ -108,7 +108,7 @@ Urutan script di tiap HTML wajib: `js/api.js` lalu `js/app.js`.
 
 - Password di-hash dengan `password_hash()` (bcrypt), dicek dengan `password_verify()`.
 - Semua query memakai prepared statement PDO.
-- Rate limit: 5x gagal login / 10 menit, 20 order / menit. Disimpan di `storage/ratelimit/`.
+- Rate limit: 20 order / menit. Disimpan di `storage/ratelimit/`.
 - Pesanan `pending` yang lewat `expires_at` dibatalkan otomatis dan stok dikembalikan
   (sweep dijalankan di sela request, maksimal sekali per menit).
 - `JWT_SECRET` wajib diganti sebelum dipakai di server publik.

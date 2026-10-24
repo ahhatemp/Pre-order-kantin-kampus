@@ -34,6 +34,5 @@ return [
     'jwt_secret' => getenv('JWT_SECRET') ?: 'default_jwt_secret',
     'midtrans_server_key' => getenv('MIDTRANS_SERVER_KEY') ?: '',
     'midtrans_is_production' => getenv('MIDTRANS_IS_PRODUCTION') === 'true',
-    'rate_limit_auth' => (int)(getenv('RATE_LIMIT_AUTH_MAX') ?: 5),
     'rate_limit_order' => (int)(getenv('RATE_LIMIT_ORDER_MAX') ?: 20),
 ];

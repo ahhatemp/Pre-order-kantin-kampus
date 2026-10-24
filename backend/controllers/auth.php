@@ -2,13 +2,8 @@
 require_once __DIR__ . '/../helpers.php';
 require_once __DIR__ . '/../auth.php';
 require_once __DIR__ . '/../db.php';
-require_once __DIR__ . '/../rate_limit.php';
 
 function auth_register() {
-    $config = require __DIR__ . '/../config.php';
-    // Hanya gagal login (401) yang mengurangi kuota, error validasi tidak.
-    rate_limit_check('auth', $config['rate_limit_auth'], 600, 'Terlalu banyak percobaan login. Tunggu 10 menit.');
-
     $body = get_json_body();
     $nim = $body['nim'] ?? null;
     $nama = $body['nama'] ?? null;
@@ -36,9 +31,6 @@ function auth_register() {
 }
 
 function auth_login() {
-    $config = require __DIR__ . '/../config.php';
-    rate_limit_check('auth', $config['rate_limit_auth'], 600, 'Terlalu banyak percobaan login. Tunggu 10 menit.');
-
     $body = get_json_body();
     $email = $body['email'] ?? null;
     $password = $body['password'] ?? null;
@@ -52,8 +44,6 @@ function auth_login() {
         $user = $stmt->fetch();
 
         if (!$user || !password_verify($password, $user['password'])) {
-            // Perhitungannya di sini, bukan di awal: validasi 400 tidak mengunci akun.
-            rate_limit_hit('auth', $config['rate_limit_auth'], 600);
             json_error('Email atau password salah', 401);
         }
 

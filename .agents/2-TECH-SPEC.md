@@ -228,12 +228,11 @@ Respons `201`:
 
 | Limiter | Batas | Window | Cakupan |
 |---|---|---|---|
-| Auth (login/register) | 5 | 10 menit | Per IP; hanya login gagal yang menambah counter |
 | Order | 20 | 1 menit | Per IP |
 | Pending order | 3 | — | Per user, order `pending` yang belum kedaluwarsa |
 
 Counter disimpan sebagai file JSON dengan `flock()`. Jika direktori storage tidak bisa ditulis,
-limiter membiarkan request lewat (fail-open).
+limiter membiarkan request lewat (fail-open). Login tidak dibatasi percobaannya.
 
 ## 7. Order Lifecycle & Anti-Oversell
 

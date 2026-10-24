@@ -47,14 +47,3 @@ function rate_limit($bucket, $max, $windowSeconds, $message) {
     }
 }
 
-// Cek kuota tanpa memakainya (untuk limiter yang hanya boleh menghitung kegagalan).
-function rate_limit_check($bucket, $max, $windowSeconds, $message) {
-    if (!rate_limit_run($bucket, $max, $windowSeconds, false)) {
-        json_error($message, 429);
-    }
-}
-
-// Tandai kuota terpakai tanpa cek.
-function rate_limit_hit($bucket, $max, $windowSeconds) {
-    rate_limit_run($bucket, $max, $windowSeconds, true);
-}
