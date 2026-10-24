@@ -1,5 +1,9 @@
 # PRD: Sistem Pre-Order Kantin Kampus
 
+> **Status dokumen (v1):** PRD ini sudah diselaraskan dengan implementasi aktual di repo —
+> backend PHP 8 native + PDO/MySQL, frontend HTML/CSS/JS tanpa build step. Rincian teknis
+> ada di `2-TECH-SPEC.md`, status pekerjaan di `3-TASKS.md`.
+
 ## 1. Visi & Tujuan Produk
 
 ### Visi Produk
@@ -39,9 +43,9 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 
 ### Modul 1: Autentikasi & Akun
 - Sebagai mahasiswa baru, saya ingin register dengan NIM dan email, agar bisa membuat akun.
-- Sebagai mahasiswa, saya ingin login dengan email/NIM, agar bisa akses aplikasi.
-- Sebagai mahasiswa, saya ingin reset password, agar bisa kembali akses jika lupa.
-- Sebagai admin kantin, saya ingin login khusus admin, agar bisa manage orders dan stok.
+- Sebagai mahasiswa, saya ingin login dengan email, agar bisa akses aplikasi.
+- Sebagai mahasiswa, saya ingin reset password, agar bisa kembali akses jika lupa. *(v2)*
+- Sebagai admin kantin, saya ingin login dengan akun admin, agar bisa manage orders dan stok.
 
 ### Modul 2: Browse & Pre-Order
 - Sebagai mahasiswa, saya ingin lihat menu hari ini dengan harga, agar tahu ada apa.
@@ -73,90 +77,90 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 ### Modul 1: Autentikasi & Akun
 
 **FR-01: Registrasi Mahasiswa**
-- **Input:** NIM, nama, email, password
-- **Proses:** Validasi NIM unik, validasi email format, hash password (bcryptjs cost 12), simpan ke DB
+- **Input:** NIM (opsional), nama, email, password
+- **Proses:** Validasi email format & keunikan, hash password dengan `password_hash()` bcrypt cost 12, simpan ke DB dengan role `mahasiswa`
 - **Output:** Akun terdaftar dan langsung aktif (verifikasi email menjadi v2)
-- **Aturan:** Password minimal 8 karakter, NIM harus format valid, email harus unik
+- **Aturan:** Nama dan email wajib, password minimal 8 karakter, NIM maksimal 20 karakter dan unik bila diisi
 
 **FR-02: Login Mahasiswa**
-- **Input:** Email/NIM, password
-- **Proses:** Verifikasi kredensial, generate JWT token
-- **Output:** Token akses, redirect ke dashboard mahasiswa
-- **Aturan:** 5x login gagal = blokir 10 menit
+- **Input:** Email, password
+- **Proses:** Verifikasi kredensial, generate JWT HS256 berlaku 12 jam
+- **Output:** Token akses, redirect ke halaman menu
+- **Aturan:** Rate limit per IP: 5x login gagal dalam 10 menit akan diblokir sementara
 
 **FR-03: Login Admin**
-- **Input:** Admin ID, password
-- **Proses:** Verifikasi role admin, generate JWT token khusus
-- **Output:** Token akses, redirect ke dashboard admin
-- **Aturan:** Role "admin" only bisa akses panel
+- **Input:** Email, password
+- **Proses:** Verifikasi kredensial dan role `admin`, generate JWT HS256
+- **Output:** Token akses, redirect ke papan pesanan admin
+- **Aturan:** Role "admin" saja yang bisa mengakses endpoint `/api/admin/*`
 
-**FR-04: Reset Password**
+**FR-04: Reset Password** *(v2 — tidak dikerjakan di v1)*
 - **Input:** Email terdaftar
 - **Proses:** Generate reset token, kirim link via email, user set password baru
 - **Output:** Password berhasil direset
-- **Aturan:** Reset link valid 24 jam
+- **Aturan:** Ditunda karena belum ada layanan email yang ditentukan
 
 ### Modul 2: Menu & Stok
 
-**FR-05: Lihat Menu Hari Ini**
-- **Input:** Tanggal hari ini
-- **Proses:** Query menu dari DB sesuai tanggal, ambil harga dan deskripsi
-- **Output:** List menu dengan harga, gambar (opsional), kategori
-- **Aturan:** Menu hanya tampil jika status aktif
+**FR-05: Lihat Menu Aktif**
+- **Input:** —
+- **Proses:** Query menu dengan `is_active = 1`, urut nama
+- **Output:** List menu dengan harga, gambar (opsional), kategori, dan stok terkini
+- **Aturan:** Menu nonaktif tidak tampil ke mahasiswa; v1 memakai satu set menu (belum ada jadwal per tanggal)
 
 **FR-06: Update Stok (Admin)**
 - **Input:** Item ID, jumlah stok baru
-- **Proses:** Update stok di DB, log perubahan
-- **Output:** Stok terupdate; ditandai "stok menipis" di UI admin jika stok < threshold (misal 5 item)
-- **Aturan:** Hanya admin yang bisa update stok
+- **Proses:** Update `menus.stok` di DB
+- **Output:** Stok terupdate; UI admin menandai stok menipis/habis
+- **Aturan:** Hanya admin yang bisa update stok; v1 belum menyimpan log perubahan stok
 
-**FR-07: Real-time Stok Visibility**
+**FR-07: Stok Visibility**
 - **Input:** Item ID
 - **Proses:** Query stok saat itu dari DB
 - **Output:** Tampil stok available, "Out of Stock" jika habis
-- **Aturan:** Update setiap order confirmed/marked ready
+- **Aturan:** Stok dipotong saat order dibuat dan dikembalikan saat order dibatalkan/kedaluwarsa
 
 ### Modul 3: Pre-Order & Pickup Time
 
 **FR-08: Create Order dengan Pickup Time**
-- **Input:** User ID, item list, pickup time (jam), catatan khusus
-- **Proses:** Validasi stok cukup, deduct stok sementara, create order record, generate order ID
-- **Output:** Order created, order confirmation screen
-- **Aturan:** Pickup time pilihan: 12:00, 13:00, 14:00, 15:00 (configurable by admin)
+- **Input:** Item list, `pickup_at` (tanggal + jam), catatan khusus (opsional)
+- **Proses:** Validasi stok dalam transaksi + row lock, potong stok, buat order `pending`, set `expires_at` = sekarang + 10 menit
+- **Output:** Order created beserta `order_code`, total, dan `payment_token`
+- **Aturan:** UI menyediakan slot 12:00–16:00; backend menerima jam 07:00–17:00, minimal 5 menit ke depan, maksimal 7 hari ke depan
 
 **FR-09: Add Multiple Items**
 - **Input:** Multiple item IDs dengan qty
-- **Proses:** Validate stok semua items, add ke cart
+- **Proses:** Validasi stok semua item, simpan ke keranjang (client) lalu checkout
 - **Output:** Cart terupdate, total harga
-- **Aturan:** Max items per order = 10
+- **Aturan:** Maksimal 10 baris item per order; qty per item 1–50; item dengan menu_id sama digabung
 
 **FR-10: Calculate Total Price**
 - **Input:** Item list dengan qty
-- **Proses:** Sum (item price × qty) + tax/fee jika ada
+- **Proses:** Sum (harga menu saat order × qty), harga disimpan di `order_items.price_at_order`
 - **Output:** Total harga, breakdown itemized
-- **Aturan:** Bisa ada diskon khusus (future feature)
+- **Aturan:** Tidak ada pajak/biaya tambahan di v1; diskon khusus ditunda ke v2
 
 ### Modul 4: Pembayaran
 
 **FR-11: Payment Gateway Integration**
-- **Input:** Order ID, payment method (e-wallet/transfer)
-- **Proses:** Call payment API, wait confirmation, update order status
+- **Input:** Order ID, metode pembayaran dipilih di halaman Snap Midtrans (e-wallet/QRIS/transfer bank)
+- **Proses:** Generate Snap Token saat order dibuat; Midtrans mengirim webhook untuk update status
 - **Output:** Payment confirmed, order status = "paid"
-- **Aturan:** Payment timeout 10 menit, order auto-cancel jika tidak bayar
+- **Aturan:** Payment timeout 10 menit, order auto-cancel jika tidak bayar. Bila Midtrans belum dikonfigurasi, order tetap dibuat dengan token dummy dan menunggu konfirmasi manual (mode demo)
 
 **FR-12: Invoice / Rincian Pesanan**
 - **Input:** Order ID
 - **Proses:** Ambil rincian item, total harga, status pembayaran dari DB
-- **Output:** Rincian order tampil di halaman tracking (dengan `order_code` yang human-readable, misal `ORD-241011-001`)
+- **Output:** Rincian order tampil di halaman tracking (dengan `order_code` human-readable, misal `ORD-A1B2C3D4`)
 - **Aturan:** Generate file PDF untuk unduhan ditunda ke v2
 
 ### Modul 5: Order Management (Admin)
 
 **FR-13: View All Orders Real-time**
-- **Input:** Admin dashboard request
-- **Proses:** Query semua orders hari ini, sort by pickup time
-- **Output:** List orders dengan status (pending, paid, ready, completed)
-- **Aturan:** Auto-refresh setiap 5 detik
+- **Input:** Admin dashboard request, filter tanggal opsional (`?pickup_date=`)
+- **Proses:** Query orders, sort by `pickup_at`, sertakan item dan data pemesan
+- **Output:** List orders dengan status (pending, paid, ready, completed, cancelled)
+- **Aturan:** Halaman admin memuat ulang data setiap 30 detik selama terbuka
 
 **FR-14: Filter Orders by Pickup Time**
 - **Input:** Pickup time selection (12:00, 13:00, dst)
@@ -172,9 +176,9 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 
 **FR-16: Order Tracking (User)**
 - **Input:** Order ID
-- **Proses:** Client polling `GET /api/orders/:id` setiap 5 detik saat halaman tracking terbuka
+- **Proses:** Saat halaman tracking terbuka, client memuat ulang `GET /api/orders/:id` setiap 30 detik (dan saat tab kembali aktif)
 - **Output:** Current status (pending, paid, ready, completed) ter-update otomatis
-- **Aturan:** Polling berhenti saat status `completed` atau `cancelled`
+- **Aturan:** Status final (`completed`/`cancelled`) tidak berubah lagi; halaman tetap menyegarkan data selama terbuka
 
 ### Modul 6: Notifikasi *(v2 — tidak dikerjakan di v1)*
 
@@ -190,11 +194,11 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 - **Output:** User notified order siap diambil
 - **Aturan:** Include pickup time reminder
 
-**FR-19: Auto-Cancel Order Kedaluwarsa** *(baru, v1)*
+**FR-19: Auto-Cancel Order Kedaluwarsa** *(v1)*
 - **Input:** Order dengan status `pending` yang `expires_at` sudah lewat
-- **Proses:** Job `setInterval` di server membatalkan order dan mengembalikan stok ke `menus` dalam satu transaksi
+- **Proses:** Sweep di sela request API (maksimal sekali per menit) membatalkan order dan mengembalikan stok ke `menus` dalam satu transaksi
 - **Output:** Order berstatus `cancelled`, stok menu pulih
-- **Aturan:** Berlaku 10 menit setelah order dibuat (FR-11)
+- **Aturan:** Berlaku 10 menit setelah order dibuat (FR-11); tidak memakai cron/daemon terpisah
 
 ---
 
@@ -206,48 +210,52 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 - Support 500 concurrent users (peak lunch hour)
 
 ### Keamanan
-- Password di-hash (bcryptjs, cost 12)
-- HTTPS wajib semua traffic
-- JWT token expiry 12 jam (kurangi dari 24)
+- Password di-hash dengan `password_hash()` bcrypt cost 12
+- HTTPS wajib semua traffic (di luar scope kode aplikasi)
+- JWT HS256 dengan expiry 12 jam
 - Role-based access control (mahasiswa/admin strict separation)
-- Brute-force protection: 5x gagal login = blokir 10 menit
-- Semua query pakai prepared statement (placeholder `?`) untuk mencegah SQL injection
-- Pembuatan order dibungkus transaksi + row locking untuk mencegah stok oversell
+- Brute-force protection: 5x login gagal per IP dalam 10 menit = diblokir sementara
+- Semua query memakai prepared statement PDO (placeholder `?`) untuk mencegah SQL injection
+- Pembuatan order dibungkus transaksi + `SELECT ... FOR UPDATE` untuk mencegah stok oversell
+- Webhook Midtrans divalidasi dengan `signature_key` dan `gross_amount`
 
 ### Skalabilitas
 - Target 2000 mahasiswa aktif
-- Database: MySQL 8.0 dengan connection pooling (`mysql2`)
+- Database: MySQL 8.0 diakses lewat PDO (satu koneksi per request, tanpa connection pool aplikasi)
+- Rate limit disimpan di file lokal; cocok untuk satu server, perlu pindah ke DB/Redis bila multi-server
 
 ### Availability & Reliability
 - Uptime target 99.5% (downtime < 2 jam per bulan)
-- Backup database harian
-- Order data harus survive single server failure
+- Backup database harian (prosedur operasional, belum diotomasi di repo)
+- Order data harus survive single server failure (tanggung jawab konfigurasi database/hosting)
 
 ### Usability
 - Mobile-first responsive (80% user pakai mobile)
 - Bahasa Indonesia (UI, messages)
-- Offline fallback: bisa lihat menu cached, order baru butuh online
+- Tidak ada mode offline di v1; semua data menu dan pesanan diambil dari API
 
 ---
 
 ## 6. Out of Scope & Dependensi
 
 ### Out of Scope (Tidak Dikerjakan di V1)
-- **Push notification (FCM/email)** — ditunda ke v2. Di v1 user polling status pesanan di halaman tracking. Config Firebase + service worker terlalu berat untuk scope v1.
-- **Email verifikasi akun** — ditunda ke v2. Registrasi v1 langsung aktif setelah validasi NIM/email.
+- **Push notification (FCM/email)** — ditunda ke v2. Di v1 status pesanan dilihat lewat halaman tracking yang menyegarkan data tiap 30 detik.
+- **Email verifikasi akun** — ditunda ke v2. Registrasi v1 langsung aktif setelah validasi email/NIM.
+- **Reset password via email** — ditunda ke v2 karena belum ada layanan email.
 - **Invoice PDF** — ditunda ke v2. v1 menampilkan rincian order langsung di halaman tracking.
 - **Delivery ke kelas** — ditunda ke v2 (butuh sistem logistik terpisah)
 - **Rating & review menu** — ditunda ke v2
 - **Loyalty points / rewards** — ditunda ke v2
 - **Multiple kantin support** — v1 fokus 1 kantin dulu
-- **Pre-order h+1 / h+2** — v1 hanya bisa order hari H
 - **Split payment (bayar gabung dengan teman)** — kompleks, di v2
+- **Jadwal menu per tanggal** — v1 memakai satu daftar menu aktif; order bisa untuk hari ini atau beberapa hari ke depan (maksimal 7 hari)
 
 ### Dependensi
-- **Payment gateway** — Midtrans untuk e-wallet, QRIS, & transfer bank
-- **Database** — MySQL 8.0
-- **Backend framework** — Node.js + Express + TypeScript (final, lihat Tech Spec)
-- **Frontend framework** — Next.js (App Router) + Tailwind CSS + shadcn/ui (final)
+- **Payment gateway** — Midtrans Snap (e-wallet, QRIS, transfer bank)
+- **Database** — MySQL 8.0 / MariaDB 10.3+, charset `utf8mb4`
+- **Backend** — PHP 8.0+ native tanpa framework, PDO, ekstensi `curl`
+- **Frontend** — HTML + CSS + JavaScript polos, tanpa build step
+- **Web server** — PHP built-in server (development) atau Apache/Laragon (`.htaccess`)
 - **Push notification service** — Firebase Cloud Messaging (FCM) — **v2**, tidak dipakai di v1
 - **Hosting** — Cloud provider (AWS/GCP/Railway) — TBD saat deployment
 
@@ -257,4 +265,4 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 - Mahasiswa punya e-wallet atau rekening bank untuk bayar
 - Kantin punya 1 admin yang handle sistem (bisa multiple di v2)
 - Menu kantin sudah terstruktur (tidak berubah drastis tiap hari)
-- Kantin buka jam 07:00 - 17:00, pickup time configurable sesuai jam buka
+- Kantin buka jam 07:00 - 17:00; frontend menawarkan slot pickup 12:00–16:00 dan backend menolak jam di luar jam operasional

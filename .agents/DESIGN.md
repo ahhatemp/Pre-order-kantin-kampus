@@ -1,5 +1,9 @@
 # Design System: Pre-Order Kantin Kampus
 
+> **Status implementasi (v1):** Dokumen ini menjadi acuan visual. Implementasi aktual memakai
+> CSS polos di `frontend/css/styles.css` (tanpa Tailwind/shadcn/build step). Token warna,
+> tipografi, spacing, radius, shadow, dan status sudah dipakai. Dark mode belum diimplementasikan.
+
 ## 1. Design Principles
 
 1. **Mobile-First, Thumb-Zone Optimized** — 80% user pakai HP. Tap targets min 44×44px, scroll-friendly. Critical actions dalam jangkauan ibu jari (bawah 60%).
@@ -312,11 +316,11 @@ _"Pre-order. Ambil on-time. Makan tenang."_
 
 ### 7.1 Button
 
-**Variants:** `default` (primary), `accent`, `secondary`, `outline`, `ghost`, `destructive`
+**Variants:** `primary`, `accent`, `secondary`, `ghost`, `danger` (kelas `btn--*`)
 
-**Sizes:** `sm` (32px), `md` (40px), `lg` (48px), `icon` (40px)
+**Sizes:** default (min-height 44px), `sm` (44px), `lg` (52px), plus `block` (lebar penuh)
 
-**States:** default, hover, active, focus, disabled, loading
+**States:** default, hover, active, focus, disabled
 
 #### Default Variant
 
@@ -535,7 +539,12 @@ Used in order tracking page.
 **Inactive steps:** Muted color, smaller icon.
 **Connector line:** Lime if completed, muted if pending.
 
-**Status update (v1):** halaman tracking melakukan polling ke `GET /api/orders/:id` setiap 5 detik. Polling berhenti otomatis saat status `completed` atau `cancelled`. Karena v1 tidak memakai push notification, halaman tracking adalah satu-satunya cara user tahu status sudah `Siap Diambil` — tambahkan indikator visual kecil di header ("Diperbarui otomatis") supaya user tidak mengira halaman tersebut statis.
+**Status update (v1):** halaman tracking memuat ulang `GET /api/orders/:id` setiap 30 detik
+selama terbuka, dan sekali lagi saat tab kembali aktif. Karena v1 tidak memakai push
+notification, halaman tracking adalah satu-satunya cara user tahu status sudah `Siap Diambil` —
+sertakan indikator visual kecil di header ("Diperbarui otomatis") supaya user tidak mengira
+halaman tersebut statis. Status final (`completed`/`cancelled`) tidak berubah lagi, tetapi
+refresh tetap berjalan selama halaman terbuka.
 
 ---
 
@@ -693,7 +702,7 @@ Admin panel layout — orders grouped by pickup time slot.
 │ Total Bayar: Rp 95.000     │
 │                            │
 │ Metode Pembayaran:         │
-│ ○ E-Wallet (GCash, OVO)    │
+│ ○ E-Wallet / QRIS          │
 │ ○ Transfer Bank            │
 │ ○ QRIS                     │
 │                            │
@@ -753,7 +762,7 @@ Admin panel layout — orders grouped by pickup time slot.
 │    [ADMIN PANEL]           │
 │                            │
 │   ┌──────────────────────┐ │
-│   │ Admin ID             │ │
+│   │ Email admin          │ │
 │   │ [________________]   │ │
 │   └──────────────────────┘ │
 │                            │
@@ -833,410 +842,29 @@ Admin panel layout — orders grouped by pickup time slot.
 
 ---
 
-## 9. Tailwind Configuration
+## 9. Implementasi CSS Aktual
 
-### tailwind.config.ts
+> Section ini menggantikan konfigurasi Tailwind lama. Implementasi memakai CSS polos tanpa build step.
 
-```typescript
-import type { Config } from 'tailwindcss'
-
-const config: Config = {
-  darkMode: ['class'],
-  content: [
-    './app/**/*.{ts,tsx}',
-    './components/**/*.{ts,tsx}',
-  ],
-  theme: {
-    extend: {
-      fontFamily: {
-        display: ['Space Grotesk', 'sans-serif'],
-        sans: ['Inter', 'sans-serif'],
-      },
-      colors: {
-        background: 'hsl(var(--background) / <alpha-value>)',
-        foreground: 'hsl(var(--foreground) / <alpha-value>)',
-        primary: {
-          DEFAULT: 'hsl(var(--primary) / <alpha-value>)',
-          foreground: 'hsl(var(--primary-foreground) / <alpha-value>)',
-        },
-        accent: {
-          DEFAULT: 'hsl(var(--accent) / <alpha-value>)',
-          foreground: 'hsl(var(--accent-foreground) / <alpha-value>)',
-        },
-        secondary: {
-          DEFAULT: 'hsl(var(--background-secondary) / <alpha-value>)',
-          foreground: 'hsl(var(--foreground) / <alpha-value>)',
-        },
-        muted: {
-          DEFAULT: 'hsl(var(--background-secondary) / <alpha-value>)',
-          foreground: 'hsl(var(--foreground-muted) / <alpha-value>)',
-        },
-        card: {
-          DEFAULT: 'hsl(var(--card-bg) / <alpha-value>)',
-        },
-        border: 'hsl(var(--border) / <alpha-value>)',
-        input: 'hsl(var(--input) / <alpha-value>)',
-        ring: 'hsl(var(--ring) / <alpha-value>)',
-        destructive: {
-          DEFAULT: 'hsl(var(--status-cancelled) / <alpha-value>)',
-          foreground: 'hsl(255 255 255 / <alpha-value>)',
-        },
-        status: {
-          pending: 'hsl(var(--status-pending) / <alpha-value>)',
-          paid: 'hsl(var(--status-paid) / <alpha-value>)',
-          ready: 'hsl(var(--status-ready) / <alpha-value>)',
-          completed: 'hsl(var(--status-completed) / <alpha-value>)',
-          cancelled: 'hsl(var(--status-cancelled) / <alpha-value>)',
-        },
-      },
-      borderRadius: {
-        lg: 'var(--radius-lg)',
-        md: 'var(--radius-md)',
-        sm: 'var(--radius-sm)',
-        xl: 'var(--radius-xl)',
-        full: 'var(--radius-full)',
-      },
-      boxShadow: {
-        xs: 'var(--shadow-xs)',
-        sm: 'var(--shadow-sm)',
-        md: 'var(--shadow-md)',
-        lg: 'var(--shadow-lg)',
-        xl: 'var(--shadow-xl)',
-        'interactive-hover': 'var(--shadow-interactive-hover)',
-      },
-      spacing: {
-        1: 'var(--space-1)',
-        2: 'var(--space-2)',
-        3: 'var(--space-3)',
-        4: 'var(--space-4)',
-        5: 'var(--space-5)',
-        6: 'var(--space-6)',
-        8: 'var(--space-8)',
-        10: 'var(--space-10)',
-        12: 'var(--space-12)',
-      },
-      transitionDuration: {
-        fast: 'var(--duration-fast)',
-        normal: 'var(--duration-normal)',
-        slow: 'var(--duration-slow)',
-      },
-      keyframes: {
-        'fade-in': {
-          from: { opacity: '0' },
-          to: { opacity: '1' },
-        },
-        'slide-up': {
-          from: { transform: 'translateY(8px)', opacity: '0' },
-          to: { transform: 'translateY(0)', opacity: '1' },
-        },
-        'pulse-lime': {
-          '0%, 100%': { boxShadow: '0 0 0 0 rgba(212, 255, 63, 0.7)' },
-          '50%': { boxShadow: '0 0 0 8px rgba(212, 255, 63, 0)' },
-        },
-      },
-      animation: {
-        'fade-in': 'fade-in 0.25s var(--ease-out)',
-        'slide-up': 'slide-up 0.25s var(--ease-out)',
-        'pulse-lime': 'pulse-lime 2s infinite',
-      },
-    },
-  },
-  plugins: [],
-}
-
-export default config
-```
-
-### globals.css
-
-```css
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@layer base {
-  :root {
-    /* Primitives */
-    --color-white: #FFFDF7;
-    --color-cream: #FFF9F0;
-    --color-ink-900: #1A1614;
-    --color-ink-700: #3D3530;
-    --color-ink-500: #6B6157;
-    --color-ink-300: #B8AFA5;
-    --color-ink-200: #D9D3CD;
-    --color-ink-100: #EFE9E2;
-
-    --color-lime-600: #A8E01F;
-    --color-lime-500: #D4FF3F;
-    --color-coral-600: #FF5A3C;
-    --color-coral-500: #FF7357;
-    --color-violet-600: #7C4DFF;
-    --color-violet-500: #9D6DFF;
-
-    --color-amber-600: #FFB020;
-    --color-blue-600: #3B82F6;
-    --color-green-600: #10B981;
-    --color-red-600: #EF4444;
-
-    --color-surface-ink: #171412;
-    --color-surface-light: #FAF7F2;
-    --color-border: #E5E0DB;
-    --color-border-dark: #D4CCC3;
-
-    /* Semantic */
-    --background: var(--color-white);
-    --foreground: var(--color-ink-900);
-    --primary: var(--color-lime-600);
-    --primary-foreground: var(--color-ink-900);
-    --accent: var(--color-coral-600);
-    --accent-foreground: white;
-    --background-secondary: var(--color-cream);
-    --background-section: var(--color-surface-light);
-    --background-dark: var(--color-surface-ink);
-    --foreground-secondary: var(--color-ink-700);
-    --foreground-muted: var(--color-ink-500);
-    --foreground-subtle: var(--color-ink-300);
-
-    --status-pending: var(--color-amber-600);
-    --status-paid: var(--color-blue-600);
-    --status-ready: var(--color-violet-600);
-    --status-completed: var(--color-green-600);
-    --status-cancelled: var(--color-red-600);
-
-    --border: var(--color-border);
-    --input: var(--color-white);
-    --ring: var(--color-lime-600);
-    --ring-offset: var(--color-white);
-
-    /* Component */
-    --button-primary-bg: var(--primary);
-    --button-primary-fg: var(--primary-foreground);
-    --button-primary-hover: var(--color-lime-500);
-    --button-primary-active: #8FCB1A;
-
-    --button-accent-bg: var(--accent);
-    --button-accent-fg: var(--accent-foreground);
-    --button-accent-hover: var(--color-coral-500);
-
-    --button-subtle-bg: var(--background-secondary);
-    --button-subtle-fg: var(--foreground);
-    --button-subtle-hover: var(--color-ink-100);
-
-    --card-bg: var(--background);
-    --card-border: var(--border);
-    --card-shadow: 0 2px 8px rgba(0 0 0 / 0.08);
-    --card-shadow-hover: 0 8px 16px rgba(0 0 0 / 0.12);
-
-    --input-bg: var(--input);
-    --input-border: var(--border);
-    --input-border-focus: var(--ring);
-    --input-placeholder: var(--foreground-muted);
-
-    /* Spacing */
-    --space-1: 0.25rem;
-    --space-2: 0.5rem;
-    --space-3: 0.75rem;
-    --space-4: 1rem;
-    --space-5: 1.25rem;
-    --space-6: 1.5rem;
-    --space-8: 2rem;
-    --space-10: 2.5rem;
-    --space-12: 3rem;
-
-    /* Radius */
-    --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
-    --radius-xl: 20px;
-    --radius-full: 999px;
-
-    /* Shadow */
-    --shadow-xs: 0 1px 2px rgba(0 0 0 / 0.05);
-    --shadow-sm: 0 2px 8px rgba(0 0 0 / 0.08);
-    --shadow-md: 0 4px 12px rgba(0 0 0 / 0.1);
-    --shadow-lg: 0 8px 20px rgba(0 0 0 / 0.12);
-    --shadow-xl: 0 12px 32px rgba(0 0 0 / 0.15);
-    --shadow-interactive-hover: 0 8px 16px rgba(212 255 63 / 0.2);
-
-    /* Motion */
-    --duration-fast: 150ms;
-    --duration-normal: 250ms;
-    --duration-slow: 400ms;
-    --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-    --ease-out: cubic-bezier(0, 0, 0.2, 1);
-    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --background: #0F0E0C;
-      --background-secondary: #1A1614;
-      --background-section: #262219;
-      --background-dark: #1A1614;
-
-      --foreground: #FFFDF7;
-      --foreground-secondary: #E5E0DB;
-      --foreground-muted: #B8AFA5;
-      --foreground-subtle: #6B6157;
-
-      --primary: var(--color-lime-500);
-      --primary-hover: var(--color-lime-600);
-
-      --accent: var(--color-coral-500);
-      --accent-hover: var(--color-coral-600);
-
-      --input-bg: #262219;
-      --border: #3D3530;
-      --ring: var(--color-lime-500);
-      --ring-offset: #1A1614;
-    }
-  }
-
-  * {
-    @apply border-border;
-  }
-
-  html {
-    @apply scroll-smooth;
-  }
-
-  body {
-    @apply bg-background text-foreground;
-    font-feature-settings: 'rounding' 1;
-  }
-}
-
-@layer components {
-  /* Button Base */
-  .btn {
-    @apply inline-flex items-center justify-center rounded-md font-medium
-           transition-all duration-normal ease-in-out
-           focus-visible:outline-none focus-visible:ring-2
-           focus-visible:ring-ring focus-visible:ring-offset-2
-           disabled:pointer-events-none disabled:opacity-50
-           cursor-pointer;
-  }
-
-  /* Button Variants */
-  .btn-primary {
-    @apply bg-primary text-primary-foreground hover:bg-primary/90
-           active:bg-primary/80 disabled:bg-ink-100 disabled:text-ink-300;
-  }
-
-  .btn-accent {
-    @apply bg-accent text-accent-foreground hover:bg-accent/90
-           active:bg-accent/80;
-  }
-
-  .btn-secondary {
-    @apply bg-secondary text-foreground border border-border
-           hover:bg-secondary/80 active:bg-secondary/60;
-  }
-
-  .btn-outline {
-    @apply border border-border text-foreground
-           hover:bg-accent/10 active:bg-accent/20;
-  }
-
-  .btn-ghost {
-    @apply text-foreground hover:bg-accent/10 active:bg-accent/20;
-  }
-
-  .btn-destructive {
-    @apply bg-destructive text-destructive-foreground
-           hover:bg-destructive/90 active:bg-destructive/80;
-  }
-
-  /* Button Sizes */
-  .btn-sm {
-    @apply h-8 px-3 text-xs;
-  }
-
-  .btn-md {
-    @apply h-10 px-4 text-sm;
-  }
-
-  .btn-lg {
-    @apply h-12 px-6 text-base;
-  }
-
-  .btn-icon {
-    @apply h-10 w-10 p-0;
-  }
-
-  /* Card */
-  .card {
-    @apply rounded-lg border border-card bg-card shadow-sm;
-  }
-
-  .card-interactive {
-    @apply transition-all duration-normal hover:shadow-md hover:-translate-y-0.5;
-  }
-
-  /* Input */
-  .input {
-    @apply flex h-10 w-full rounded-md border border-input bg-input px-3 py-2
-           text-sm text-foreground placeholder:text-input-placeholder
-           transition-colors duration-normal ease-in-out
-           focus-visible:outline-none focus-visible:ring-2
-           focus-visible:ring-ring focus-visible:ring-offset-2
-           disabled:cursor-not-allowed disabled:opacity-50;
-  }
-
-  /* Badge */
-  .badge {
-    @apply inline-flex items-center rounded-full px-2.5 py-0.5
-           text-xs font-medium border;
-  }
-
-  .badge-primary {
-    @apply border-transparent bg-primary text-primary-foreground;
-  }
-
-  .badge-secondary {
-    @apply border-border bg-secondary text-foreground;
-  }
-
-  .badge-destructive {
-    @apply border-transparent bg-destructive text-destructive-foreground;
-  }
-}
-
-/* Animations */
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes slide-up {
-  from {
-    transform: translateY(8px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-@keyframes pulse-lime {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(212, 255, 63, 0.7);
-  }
-  50% {
-    box-shadow: 0 0 0 8px rgba(212, 255, 63, 0);
-  }
-}
-
-/* Reduced Motion */
-@media (prefers-reduced-motion: reduce) {
-  * {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-```
+- **File utama:** `frontend/css/styles.css`.
+- **Token:** primitives, semantic, dan component token dari section 3–5 didefinisikan sebagai CSS
+  variables di `:root`.
+- **Layout primitives:** kelas `od-*` (`od-screen`, `od-stack`, `od-row`, `od-grid`, `od-rail`,
+  `od-scroll`, `od-touch`) dipakai untuk struktur halaman.
+- **Kelas komponen aktual:**
+  - Tombol: `.btn` + modifier `.btn--primary`, `.btn--accent`, `.btn--secondary`, `.btn--ghost`,
+    `.btn--danger`, `.btn--sm`, `.btn--lg`, `.btn--block`.
+  - Form: `.field`, `.field__label`, `.input`, `.input--error`, `.field__error`.
+  - Permukaan: `.card`, `.card--section`, `.badge`, `.chip`.
+  - Menu: `.menu-grid`, `.dish`, `.dish__name`, `.dish__price`.
+  - Keranjang/checkout: `.cartbar`, `.summary-row`, `.pick__time`.
+  - Tracking: `.tl`, `.tl__node`, `.tl__conn`, `.tl__title`.
+  - Navigasi: `.appbar`, `.tabbar`.
+- **Font:** Space Grotesk (display) dan Inter (body), dimuat dari Google Fonts di setiap HTML;
+  variabel `--font-display` dan `--font-body`.
+- **Ikon:** SVG inline dari `frontend/js/app.js` melalui `icon(name, size)`, bukan Lucide React.
+- **Tidak ada:** `tailwind.config.ts`, `globals.css`, atau proses build.
+- **Dark mode:** belum diimplementasikan di v1; token dark pada section 3 disimpan sebagai rencana v2.
 
 ---
 
@@ -1265,48 +893,48 @@ export default config
 - **Semantic HTML:** `<button>`, `<input>`, `<nav>`, `<main>`, `<aside>`.
 
 ### Motion & Animations
-- **Respect `prefers-reduced-motion`:** See globals.css.
+- **Respect `prefers-reduced-motion`:** sudah diterapkan di `frontend/css/styles.css`.
 - **Duration:** min 150ms, max 400ms. No flashing (>3 per second).
 - **Easing:** Use ease-out or ease-in-out, avoid linear.
 
 ### Dark Mode
+- **Status v1:** belum diimplementasikan di CSS aktual.
 - **Default:** Light theme (canvas white, ink dark).
-- **Support:** Respect `prefers-color-scheme: dark`.
-- **Toggle:** Optional user control (v2 feature).
-- **Contrast maintained:** Dark theme overrides ensure 4.5:1 min.
+- **Rencana v2:** menambahkan override `@media (prefers-color-scheme: dark)` memakai token yang
+  sudah disiapkan di section 3, lalu audit kontras.
+- **Toggle manual:** fitur v2, bukan v1.
 
 ---
 
 ## 11. Implementation Checklist
 
-### Phase 1: Setup & Tokens
-- [ ] Create `globals.css` with CSS variables (all primitives, semantic, component).
-- [ ] Setup `tailwind.config.ts` with color, spacing, shadow extends.
-- [ ] Setup `Space Grotesk` + `Inter` font imports (Google Fonts or Vercel).
-- [ ] Test light & dark mode switching.
+### Phase 1: Setup & Tokens — selesai
+- [x] Token CSS variables (primitives, semantic, component) di `frontend/css/styles.css`.
+- [x] Layout primitives `od-*`.
+- [x] Font Space Grotesk + Inter dari Google Fonts.
+- [ ] Dark mode (v2).
 
-### Phase 2: Components
-- [ ] Button (all 6 variants, 3 sizes, states).
-- [ ] Input (text, email, password, textarea, select).
-- [ ] Card (default, interactive, elevated, section).
-- [ ] Badge (6 variants).
-- [ ] Menu Card (image + title + price + action).
-- [ ] Pickup Time Selector (radio group).
-- [ ] Quantity Stepper (−/input/+).
+### Phase 2: Components — selesai
+- [x] Button (primary, accent, secondary, ghost, danger; ukuran sm/lg/block).
+- [x] Input, field, dan pesan error.
+- [x] Card, badge, chip.
+- [x] Menu card (gambar + judul + harga + aksi).
+- [x] Pickup time selector (radio group).
+- [x] Quantity stepper (−/nilai/+).
 
-### Phase 3: Screens
-- [ ] Login & Register (mahasiswa + admin).
-- [ ] Menu Browse (2-col grid, search).
-- [ ] Cart + Checkout.
-- [ ] Order Tracking (timeline).
-- [ ] Admin Order Board.
-- [ ] Admin Menu Management.
+### Phase 3: Screens — selesai
+- [x] Login & register.
+- [x] Menu browse (grid 2 kolom, pencarian, filter kategori).
+- [x] Cart + checkout + pembayaran.
+- [x] Order tracking (timeline).
+- [x] Admin order board.
+- [x] Admin menu & stock management.
 
-### Phase 4: Polish
-- [ ] Accessibility audit (contrast, tap targets, keyboard nav, ARIA labels).
+### Phase 4: Polish — sebagian
+- [ ] Accessibility audit formal (kontras, tap target, keyboard nav, ARIA).
 - [ ] Mobile responsive testing (320px, 768px, 1024px).
-- [ ] Animation & motion testing (reduced-motion respect).
-- [ ] Dark mode verification.
+- [x] Reduced-motion support.
+- [ ] Dark mode.
 - [ ] Performance: Lighthouse score >90.
 
 ---
@@ -1314,17 +942,18 @@ export default config
 ## 12. Asset References
 
 ### Fonts
-- Display: **Space Grotesk** (700, 800) — [Google Fonts](https://fonts.google.com/specimen/Space+Grotesk)
-- Body: **Inter** (400, 500, 600) — [Vercel Fonts](https://vercel.com/font)
+- Display: **Space Grotesk** (600, 700, 800) — dimuat dari Google Fonts di setiap HTML.
+- Body: **Inter** (400, 500, 600) — dimuat dari Google Fonts.
 
 ### Icons
-- Source: Lucide React (20px–24px standard).
+- Source: SVG inline di `frontend/js/app.js` (`icon(name, size)`), gaya Lucide 24×24.
 - Color: Inherit from text color or status token.
 - Strokes: 2px default.
 
 ### Images
-- Menu photos: 160×120px, object-fit cover, border-radius 12px.
-- Placeholder: Solid color band or shimmer skeleton.
+- Menu photos: object-fit cover, border-radius mengikuti token radius.
+- Placeholder: SVG fallback di `frontend/js/api.js` bila gambar tidak ditemukan.
+- Foto seed yang belum tersedia dipetakan ke aset terdekat lewat alias di `api.js`.
 
 ---
 
@@ -1332,8 +961,8 @@ export default config
 
 **For developers:**
 - All color values use CSS variables—no hardcoding hex.
-- Tailwind classes use token-backed colors (`bg-primary`, `text-accent`).
-- Component specs are *reference*—shadcn/ui & custom components refine as needed.
+- Tidak ada Tailwind; gunakan kelas komponen yang sudah ada di `frontend/css/styles.css`.
+- Component specs are *reference*—nama kelas aktual ada di section 9.
 - Wireframes are ASCII mockups for layout intent; actual UX may vary per screen.
 
 **For designers:**
