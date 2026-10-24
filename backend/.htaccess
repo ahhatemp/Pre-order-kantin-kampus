@@ -8,6 +8,11 @@ RewriteCond %{REQUEST_FILENAME} !-d
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteRule ^ api/index.php [L,QSA]
 
+# Jangan pernah serve file konfigurasi/skema/dokumen
+<FilesMatch "\.(env|sql|md|log|ini)$">
+  Require all denied
+</FilesMatch>
+
 # Blokir eksekusi langsung file .php selain front controller
 <IfModule mod_authz_core.c>
   <FilesMatch "\.php$">

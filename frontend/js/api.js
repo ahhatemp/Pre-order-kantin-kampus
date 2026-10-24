@@ -13,14 +13,16 @@ const AUTH_KEY = 'kantin:token';
 
 async function api(path, opts) {
   opts = opts || {};
-  const headers = { 'Content-Type': 'application/json' };
+  const isForm = typeof FormData !== 'undefined' && opts.body instanceof FormData;
+  const headers = {};
+  if (!isForm) headers['Content-Type'] = 'application/json';
   const token = localStorage.getItem(AUTH_KEY);
   if (token) headers.Authorization = 'Bearer ' + token;
 
   const res = await fetch(API_BASE + path, {
     method: opts.method || 'GET',
     headers: headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined
+    body: opts.body ? (isForm ? opts.body : JSON.stringify(opts.body)) : undefined
   });
 
   let data = null;
@@ -52,7 +54,13 @@ const IMG_FALLBACK = 'data:image/svg+xml;utf8,'
 
 function menuImage(url) {
   if (!url) return IMG_FALLBACK;
-  const name = String(url).split('/').pop().toLowerCase().replace(/_/g, '-');
+  const raw = String(url).trim();
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const clean = raw.replace(/^\/+/, '');
+  if (/^uploads\//i.test(clean)) {
+    return API_BASE + '/uploads/' + encodeURIComponent(clean.split('/').pop());
+  }
+  const name = clean.split('/').pop().toLowerCase().replace(/_/g, '-');
   // ponytail: alias untuk 3 seed yang fotonya belum ada; ganti begitu aset asli ditambahkan.
   const alias = { 'mie-ayam.jpg': 'mie-goreng.jpg', 'ayam-bakar.jpg': 'sate-ayam.jpg', 'es-jeruk.jpg': 'es-teh.jpg' };
   return 'assets/' + (alias[name] || name);
@@ -66,6 +74,8 @@ function mapMenu(row) {
     cat: row.kategori || 'Lainnya',
     price: Number(row.harga),
     stock: Number(row.stok),
+    active: row.is_active === undefined ? true : Number(row.is_active) === 1,
+    imageUrl: row.image_url || '',
     img: menuImage(row.image_url),
     w: 960,
     h: 720
@@ -86,7 +96,10 @@ function mapOrder(row) {
     items: lines,
     total: Number(row.total_price),
     pickup: String(row.pickup_at || '').slice(11, 16),
+    pickupDate: String(row.pickup_at || '').slice(0, 10),
+    note: row.catatan || '',
     status: row.status,
+    createdAt: row.created_at || '',
     time: String(row.created_at || '').slice(11, 16),
     expiresAt: row.expires_at || null
   };

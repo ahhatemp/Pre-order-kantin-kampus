@@ -29,8 +29,13 @@ const PAGES = {
    Akun tab stays highlighted while the user is inside them. */
 const STUDENT_ACCOUNT_SUB = ['notifikasi', 'bantuan', 'tentang'];
 const ADMIN_ACCOUNT_SUB = ['notifikasi', 'bantuan', 'profilKantin', 'jamOperasional'];
-const adminAccountActive = r => ADMIN_ACCOUNT_SUB.includes(r);
-const PAGE = (document.body && document.body.dataset.page) || 'menu';
+
+const ADMIN_ONLY = ['board', 'stock', 'accountAdmin', 'profilKantin', 'jamOperasional'];
+const STUDENT_PAGES = ['menu', 'cart', 'payment', 'success', 'orders', 'tracking', 'accountStudent'];
+const REFRESH_PAGES = ['menu', 'cart', 'payment', 'success', 'orders', 'tracking', 'board', 'stock'];
+const POLL_PAGES = ['menu', 'stock', 'board', 'orders', 'tracking'];
+
+let PAGE = (document.body && document.body.dataset.page) || 'menu';
 
 /* ---------- Icons ---------- */
 const ICONS = {
@@ -52,6 +57,8 @@ const ICONS = {
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
   trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
   pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/>',
   alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
   wallet: '<path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2"/><path d="M21 12H8a2 2 0 0 0-2 2v0a2 2 0 0 0 2 2h13a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1Z"/>',
@@ -93,19 +100,68 @@ function categories() {
   return ['Semua'].concat(set);
 }
 
-const PICKUP = [
-  { t: '12:00', wait: 'Sudah lewat', disabled: true },
-  { t: '13:00', wait: 'Sudah lewat', disabled: true },
-  { t: '14:00', wait: '±15 menit',    disabled: false },
-  { t: '15:00', wait: 'Stok terbatas', disabled: false, limited: true },
-  { t: '16:00', wait: '±120 menit',   disabled: false }
-];
-/* Slot jam ambil di papan admin dibentuk dari pesanan yang masuk. */
-function boardSlots() {
-  const set = [];
-  state.orders.forEach(o => { if (o.pickup && set.indexOf(o.pickup) === -1) set.push(o.pickup); });
-  set.sort();
-  return set;
+const SLOT_TIMES = ['12:00', '13:00', '14:00', '15:00', '16:00'];
+
+function clockNow(d) {
+  d = d || new Date();
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+function slotMinutes(t) {
+  return Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+}
+
+/* Slot hari ini; kalau semua sudah lewat, tampilkan slot besok. */
+function pickupSlots(now) {
+  now = now || new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const tomorrow = SLOT_TIMES.every(t => slotMinutes(t) <= nowMin);
+  return SLOT_TIMES.map(t => {
+    if (tomorrow) return { t: t, wait: 'Besok', disabled: false };
+    const diff = slotMinutes(t) - nowMin;
+    return { t: t, wait: diff <= 0 ? 'Sudah lewat' : '±' + diff + ' menit', disabled: diff <= 0 };
+  });
+}
+
+function nextPickupHint() {
+  const next = pickupSlots().find(s => !s.disabled);
+  if (!next) return '-';
+  return next.wait === 'Besok' ? next.t + ' besok' : next.t;
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+function dateOnly(d) {
+  return d.getFullYear() + '-'
+    + String(d.getMonth() + 1).padStart(2, '0') + '-'
+    + String(d.getDate()).padStart(2, '0');
+}
+
+function fmtDate(ymd) {
+  const parts = String(ymd).split('-');
+  return Number(parts[2]) + ' ' + (MONTHS[Number(parts[1]) - 1] || parts[1]);
+}
+
+/* Tanggal pickup harus selalu terlihat supaya order besok tidak dikira hari ini. */
+function pickupLabel(o) {
+  if (!o) return '-';
+  const date = o.pickupDate || o.date || '';
+  const time = o.pickup || o.time || '';
+  if (!date) return time || '-';
+  const today = dateOnly(new Date());
+  const tomorrow = dateOnly(new Date(Date.now() + 86400000));
+  const day = date === today ? 'Hari ini'
+    : date === tomorrow ? 'Besok'
+    : fmtDate(date);
+  return day + ' ' + time;
+}
+
+function plannedPickup() {
+  const now = new Date();
+  if (state.pickup && slotMinutes(state.pickup) <= now.getHours() * 60 + now.getMinutes()) {
+    now.setDate(now.getDate() + 1);
+  }
+  return { date: dateOnly(now), time: state.pickup || '' };
 }
 
 /* ---------- Store (persisted per-tab) ---------- */
@@ -123,13 +179,15 @@ function defaultState() {
     menu: [],
     cart: {},
     pickup: null,
+    note: null,
     payMethod: 'ewallet',
     lastOrderId: null,
     orders: [],
-    boardSlot: 'all',
+    boardFilter: 'all',
     category: 'Semua',
     search: '',
-    flash: null
+    flash: null,
+    menuForm: null
   };
 }
 
@@ -137,6 +195,7 @@ function persist() {
   /* Token tidak ikut di sini: disimpan terpisah di localStorage oleh auth.save(). */
   const snap = Object.assign({}, state);
   delete snap.loading;
+  delete snap.menuForm;
   try { sessionStorage.setItem(STORE_KEY, JSON.stringify(snap)); } catch (e) { /* ignore */ }
 }
 
@@ -169,7 +228,6 @@ const stockLeft = id => {
 /* Backend sudah mengirim pesanan terbaru duluan. */
 const myOrders = () => state.orders;
 const orderById = id => state.orders.find(o => o.id === String(id));
-const ordersBySlot = slot => state.orders.filter(o => slot === 'all' || o.pickup === slot);
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 function toast(msg, ic) {
@@ -180,17 +238,142 @@ function toast(msg, ic) {
   toast._t = setTimeout(() => el.setAttribute('data-show', 'false'), 2400);
 }
 
+function showFlash() {
+  if (!state.flash) return;
+  toast(state.flash.msg, state.flash.ic);
+  state.flash = null;
+  persist();
+}
+
 /* ---------- Navigation ---------- */
+const LEAVE_MS = 160;
+const reducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const TITLES = {
+  auth: 'Masuk — Kantin Kampus',
+  menu: 'Menu — Kantin Kampus',
+  cart: 'Keranjang — Kantin Kampus',
+  payment: 'Pembayaran — Kantin Kampus',
+  success: 'Pesanan Dibuat — Kantin Kampus',
+  orders: 'Pesanan Saya — Kantin Kampus',
+  tracking: 'Lacak Pesanan — Kantin Kampus',
+  accountStudent: 'Akun — Kantin Kampus',
+  accountAdmin: 'Akun Admin — Kantin Kampus',
+  notifikasi: 'Preferensi Notifikasi — Kantin Kampus',
+  bantuan: 'Bantuan — Kantin Kampus',
+  tentang: 'Tentang Kantin — Kantin Kampus',
+  profilKantin: 'Profil Kantin — Kantin Kampus',
+  jamOperasional: 'Jam Operasional — Kantin Kampus',
+  board: 'Pesanan Masuk — Admin Kantin',
+  stock: 'Menu & Stok — Admin Kantin'
+};
+
+const PAGE_BY_FILE = {};
+Object.keys(PAGES).forEach(k => { PAGE_BY_FILE[PAGES[k]] = k; });
+
+function roleHome() { return state.role === 'admin' ? 'board' : 'menu'; }
+
+function pageFromPath(path) {
+  const file = String(path || '').split('?')[0].split('/').pop();
+  return PAGE_BY_FILE[file] || roleHome();
+}
+
+/* Halaman yang butuh role tertentu dialihkan tanpa memuat ulang dokumen. */
+function guardPage(page) {
+  if (page === 'auth') return state.role ? roleHome() : 'auth';
+  if (!state.role) return 'auth';
+  if (ADMIN_ONLY.includes(page) && state.role !== 'admin') return roleHome();
+  if (STUDENT_PAGES.includes(page) && state.role === 'admin') return 'board';
+  return page;
+}
+
+function backFallback() {
+  if (PAGE === 'payment') return 'cart';
+  if (PAGE === 'success' || PAGE === 'tracking') return 'orders';
+  if (ADMIN_ACCOUNT_SUB.includes(PAGE)) return 'accountAdmin';
+  if (STUDENT_ACCOUNT_SUB.includes(PAGE)) return 'accountStudent';
+  if (PAGE === 'stock') return 'board';
+  return roleHome();
+}
+
+let navSeq = 0;
+
+/* Modal/kamera dilepas saat pindah layar supaya tidak menempel di halaman baru. */
+function resetOverlays() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+  const cam = $('camera');
+  if (cam) resetCamera(cam);
+  releaseMenuPreview();
+  const modal = $('modal');
+  if (modal) resetMenuForm(modal);
+  state.menuForm = null;
+}
+
+/* Navigasi antar layar tanpa memuat ulang dokumen: appbar + tabbar tetap. */
+async function goToRoute(page, opts) {
+  opts = opts || {};
+  const target = guardPage(page);
+  const replace = !!opts.replace || target !== page;
+  const same = target === PAGE;
+  const seq = ++navSeq;
+
+  resetOverlays();
+  PAGE = target;
+  state.route = target;
+  state.loading = false;
+  document.body.dataset.page = target;
+  document.title = TITLES[target] || TITLES.menu;
+
+  if (opts.history !== 'none' && (replace || !same)) {
+    const depth = (history.state && Number(history.state.depth)) || 0;
+    const entry = { page: target, depth: replace ? depth : depth + 1 };
+    if (replace) history.replaceState(entry, '', PAGES[target]);
+    else history.pushState(entry, '', PAGES[target]);
+  }
+
+  const needs = pageNeeds(target);
+  const cached = (!needs.menu || dataLoaded.menu || state.menu.length)
+    && (!needs.orders || dataLoaded.orders || state.orders.length);
+  const before = cached ? dataSignature(target) : null;
+
+  state.loading = !cached;
+  renderView();
+  if (cached) enterScreen();
+  const screen = $('screen');
+  if (screen) screen.scrollTop = 0;
+
+  try {
+    await loadData();
+  } catch (e) {
+    if (seq === navSeq) toast(e.message, 'alert');
+  }
+  if (seq !== navSeq) return;
+  state.loading = false;
+
+  if (!cached || dataSignature(target) !== before) {
+    if (screen) screen.classList.remove('is-entering');
+    renderView();
+    if (screen) screen.scrollTop = 0;
+    if (!cached) enterScreen();
+  }
+  showFlash();
+  schedulePolling();
+}
+
 function navigate(page, opts) {
   opts = opts || {};
   if (opts.params) Object.assign(state, opts.params);
   if (opts.flash) state.flash = opts.flash;
-  persist();
-  const url = PAGES[page] || PAGES.menu;
-  if (opts.replace) location.replace(url);
-  else location.href = url;
+  goToRoute(page, opts);
 }
-function back() { history.back(); }
+
+function back() {
+  if (history.state && Number(history.state.depth) > 0) { history.back(); return; }
+  navigate(backFallback(), { replace: true });
+}
 
 /* ---------- Appbar / Tabbar ---------- */
 const STUDENT_TABS = [
@@ -247,12 +430,13 @@ function renderAppbar() {
     html = stop + '<div class="od-fill"><div class="appbar__title">Jam Operasional</div></div>';
   } else if (r === 'board') {
     const pending = state.orders.filter(o => o.status === 'paid').length;
-    html = '<div class="od-fill"><div class="appbar__sub">Admin · 13:45</div>'
+    html = '<div class="od-fill"><div class="appbar__sub">Admin · ' + clockNow() + '</div>'
       + '<div class="appbar__title">Pesanan Masuk</div></div>'
       + '<span class="badge" style="color:var(--status-paid);background:color-mix(in srgb,var(--status-paid) 14%,transparent)">'
       + icon('bell', 13) + '<span>' + pending + ' perlu disiapkan</span></span>';
   } else if (r === 'stock') {
-    html = '<div class="od-fill"><div class="appbar__title">Menu &amp; Stok</div></div>';
+    html = '<div class="od-fill"><div class="appbar__title">Menu &amp; Stok</div></div>'
+      + '<button class="iconbtn iconbtn--end" data-action="new-menu" aria-label="Tambah menu">' + icon('plus', 22) + '</button>';
   }
   bar.className = 'appbar appbar--bordered';
   bar.innerHTML = html;
@@ -263,13 +447,17 @@ function renderTabbar() {
   const tabs = tabsFor();
   if (!tabs.length) { bar.innerHTML = ''; bar.hidden = true; return; }
   bar.hidden = false;
+  const count = cartCount();
+  const prevCount = renderTabbar._count;
+  renderTabbar._count = count;
   bar.innerHTML = tabs.map(t => {
     const active = t.route === state.route
       || (t.route === 'cart' && ['payment', 'success'].includes(state.route))
       || (t.route === 'orders' && state.route === 'tracking')
       || (t.route === 'accountStudent' && STUDENT_ACCOUNT_SUB.includes(state.route))
       || (t.route === 'accountAdmin' && ADMIN_ACCOUNT_SUB.includes(state.route));
-    const badge = (t.route === 'cart' && cartCount()) ? '<span class="tab__badge">' + cartCount() + '</span>' : '';
+    const pop = count > prevCount && prevCount !== undefined;
+    const badge = (t.route === 'cart' && count) ? '<span class="tab__badge' + (pop ? ' tab__badge--pop' : '') + '">' + count + '</span>' : '';
     return '<a class="tab" href="' + PAGES[t.route] + '" data-action="go" data-route="' + t.route + '" aria-current="' + (active ? 'page' : 'false') + '">'
       + badge + icon(t.icon, 22) + '<span>' + t.label + '</span></a>';
   }).join('');
@@ -277,13 +465,20 @@ function renderTabbar() {
 
 function renderCartbar() {
   const el = $('cartbar');
-  if (state.route !== 'menu' || cartCount() === 0) { el.innerHTML = ''; return; }
+  if (!el) return;
+  const show = state.route === 'menu' && cartCount() > 0;
+  const key = show ? cartCount() + ':' + cartTotal() : '';
+  if (el.dataset.key === key) return;
+  el.dataset.key = key;
+  if (!show) { el.innerHTML = ''; return; }
+  const fresh = !el.firstElementChild;
   el.innerHTML = '<div class="cartbar"><div class="cartbar__row">'
     + '<div class="od-stack" style="--od-gap:2px"><span class="cartbar__label">' + cartCount() + ' item di keranjang</span>'
     + '<span class="cartbar__total od-nowrap">' + fmt(cartTotal()) + '</span></div>'
     + '<button class="btn btn--primary" data-action="go" data-route="cart">Lihat Keranjang' + icon('arrowRight', 18) + '</button>'
     + '</div></div>';
   el.setAttribute('aria-live', 'polite');
+  if (fresh) el.firstElementChild.classList.add('cartbar--enter');
 }
 
 /* ---------- Views ---------- */
@@ -362,7 +557,7 @@ function viewMenu() {
   const hero = '<div class="hero" style="margin-top:var(--space-3)">'
     + '<span class="hero__eyebrow">Pre-order hari ini</span>'
     + '<span class="hero__title">Ambil sesuai jadwal, tanpa antre</span>'
-    + '<div class="hero__meta">' + icon('clock', 15) + '<span>Kantin buka 07:00–17:00 · Pickup mulai 14:00</span></div>'
+    + '<div class="hero__meta">' + icon('clock', 15) + '<span>Kantin buka 07:00–17:00 · Pickup mulai ' + nextPickupHint() + '</span></div>'
     + '</div>';
 
   const cards = list.length ? '<div class="menu-grid">' + list.map(dishCard).join('') + '</div>'
@@ -425,10 +620,10 @@ function viewCart() {
   }).join('');
 
   const pickup = '<div class="section-title">Kapan mau ambil?</div><div class="option-list" role="group" aria-label="Pilih jam ambil">'
-    + PICKUP.map(p => '<button class="pick" data-action="select-pickup" data-time="' + p.t + '" aria-pressed="' + (state.pickup === p.t) + '"' + (p.disabled ? ' disabled' : '') + '>'
+    + pickupSlots().map(p => '<button class="pick" data-action="select-pickup" data-time="' + p.t + '" aria-pressed="' + (state.pickup === p.t) + '"' + (p.disabled ? ' disabled' : '') + '>'
       + '<span class="pick__ring" aria-hidden="true"></span>'
       + '<span class="od-fill od-stack" style="--od-gap:2px"><span class="pick__time">' + p.t + '</span>'
-      + '<span class="pick__wait' + (p.limited ? ' pick__wait--limited' : '') + '">' + p.wait + '</span></span></button>').join('')
+      + '<span class="pick__wait">' + p.wait + '</span></span></button>').join('')
     + '</div>';
 
   return '<div style="margin-top:var(--space-2)">' + lines + '</div>'
@@ -438,6 +633,8 @@ function viewCart() {
     + '<div class="summary-row summary-row--total"><span>Total</span><span class="od-nowrap">' + fmt(cartTotal()) + '</span></div>'
     + '</div>'
     + pickup
+    + '<div class="section-title">Catatan (opsional)</div>'
+    + '<textarea class="input" id="note" rows="2" maxlength="255" placeholder="Contoh: tanpa sambal" style="resize:vertical;font-family:inherit">' + esc(state.note || '') + '</textarea>'
     + '<button class="btn btn--accent btn--lg btn--block" style="margin-top:var(--space-4)" data-action="to-payment"' + (state.pickup ? '' : ' disabled') + '>'
     + (state.pickup ? 'Lanjut ke Pembayaran' : 'Pilih jam ambil dulu') + icon('arrowRight', 18) + '</button>';
 }
@@ -452,7 +649,7 @@ function viewPayment() {
     + '<div class="cartbar__label">Total Bayar</div>'
     + '<div style="font-family:var(--font-display);font-weight:800;font-size:32px;letter-spacing:-.02em" class="od-nowrap">' + fmt(cartTotal()) + '</div>'
     + '<div class="hero__meta" style="color:var(--foreground-muted);margin-top:6px">' + icon('clock', 15)
-    + '<span>Pickup ' + (state.pickup || '-') + ' · ' + cartCount() + ' item</span></div>'
+    + '<span>Pickup ' + esc(state.pickup ? pickupLabel(plannedPickup()) : '-') + ' · ' + cartCount() + ' item</span></div>'
     + '</div>'
     + '<div class="section-title">Metode Pembayaran</div>'
     + '<div class="option-list" role="group" aria-label="Metode pembayaran">'
@@ -480,7 +677,7 @@ function viewSuccess() {
     + '</div>'
     + '<div class="card" style="padding:var(--space-5)">'
     + '<div class="summary-row"><span class="muted">Order ID</span><span style="font-weight:600">' + esc(o.code || o.id) + '</span></div>'
-    + '<div class="summary-row"><span class="muted">Jam ambil</span><span style="font-weight:600">' + esc(o.pickup || '-') + '</span></div>'
+    + '<div class="summary-row"><span class="muted">Pengambilan</span><span style="font-weight:600">' + esc(pickupLabel(o)) + '</span></div>'
     + '<div class="summary-row"><span class="muted">Jumlah item</span><span style="font-weight:600">' + o.items.reduce((s, l) => s + l.qty, 0) + '</span></div>'
     + '<div class="summary-row summary-row--total"><span>Total</span><span class="od-nowrap">' + fmt(o.total) + '</span></div>'
     + '</div>'
@@ -504,7 +701,7 @@ function viewOrders() {
   return '<div style="margin-top:var(--space-2)">' + list.map(o => {
     return '<button class="order-card" style="width:100%;text-align:left;cursor:pointer;margin-top:var(--space-3)" data-action="order-detail" data-order="' + o.id + '">'
       + '<div class="od-row"><div class="od-fill od-stack" style="--od-gap:2px"><span style="font-weight:600;font-size:14px">' + esc(o.code || o.id) + '</span>'
-      + '<span class="muted" style="font-size:12px">Pickup ' + esc(o.pickup || '-') + ' · ' + o.items.length + ' jenis item</span></div>'
+      + '<span class="muted" style="font-size:12px">Pickup ' + esc(pickupLabel(o)) + ' · ' + o.items.length + ' jenis item</span></div>'
       + statusBadge(o.status) + '</div>'
       + '<div class="od-row"><span class="od-fill" style="font-family:var(--font-display);font-weight:700;font-size:16px" >' + fmt(o.total) + '</span>'
       + '<span style="color:var(--foreground-muted)">' + icon('chevronRight', 18) + '</span></div></button>';
@@ -548,10 +745,13 @@ function viewTracking() {
   const items = '<div class="card" style="padding:var(--space-4);margin-top:var(--space-4)">'
     + '<div class="cartbar__label" style="margin-bottom:8px">Rincian Pesanan</div>'
     + o.items.map(l => '<div class="summary-row"><span class="muted">' + esc(l.name) + ' × ' + l.qty + '</span><span class="od-nowrap">' + fmt(l.price * l.qty) + '</span></div>').join('')
-    + '<div class="summary-row summary-row--total"><span>Total</span><span class="od-nowrap">' + fmt(o.total) + '</span></div></div>';
+    + '<div class="summary-row summary-row--total"><span>Total</span><span class="od-nowrap">' + fmt(o.total) + '</span></div>'
+    + (o.note ? '<div class="note" style="margin-top:var(--space-2)">' + icon('info', 14) + '<span>Catatan: ' + esc(o.note) + '</span></div>' : '')
+    + '</div>';
 
   return '<div class="od-row" style="margin-top:var(--space-2)"><div class="od-fill"><div class="appbar__sub">Order ID</div>'
-    + '<div style="font-family:var(--font-display);font-weight:700;font-size:16px">' + esc(o.code || o.id) + '</div></div>'
+    + '<div style="font-family:var(--font-display);font-weight:700;font-size:16px">' + esc(o.code || o.id) + '</div>'
+    + '<span class="muted" style="font-size:12px">Ambil ' + esc(pickupLabel(o)) + '</span></div>'
     + statusBadge(o.status) + '</div>'
     + cancelBadge
     + '<div class="card" style="padding:var(--space-5);margin-top:var(--space-4)"><div class="timeline">' + steps + '</div></div>'
@@ -695,50 +895,58 @@ function orderCardAdmin(o) {
   return '<div class="order-card">'
     + '<div class="od-row"><div class="od-fill od-stack" style="--od-gap:2px">'
     + '<span style="font-weight:600;font-size:14px">' + esc(o.buyerName) + '</span>'
-    + '<span class="muted" style="font-size:11.5px">' + o.nim + ' · masuk ' + o.time + '</span></div>'
+    + '<span class="muted" style="font-size:11.5px">' + o.nim + ' · masuk ' + o.time + ' · ambil ' + esc(pickupLabel(o)) + '</span></div>'
     + statusBadge(o.status) + '</div>'
     + '<div class="order-card__items">' + items + '</div>'
+    + (o.note ? '<div class="note" style="margin-top:6px">' + icon('info', 14) + '<span>Catatan: ' + esc(o.note) + '</span></div>' : '')
     + '<div class="od-row"><span class="od-fill od-nowrap" style="font-family:var(--font-display);font-weight:700;font-size:15px">' + fmt(o.total) + '</span>'
     + '<div class="order-card__actions" style="flex:0 0 auto">' + actions + '</div></div>'
     + '</div>';
 }
 
+const BOARD_FILTERS = [
+  { id: 'all', label: 'Semua' },
+  { id: 'paid', label: 'Perlu disiapkan' },
+  { id: 'ready', label: 'Siap diambil' },
+  { id: 'completed', label: 'Selesai' }
+];
+
 function viewBoard() {
-  const slots = ['all'].concat(boardSlots());
-  const rail = '<div class="slot-rail" role="group" aria-label="Filter jam ambil">'
-    + slots.map(s => '<button class="chip" data-action="admin-filter" data-slot="' + esc(s) + '" aria-pressed="' + (state.boardSlot === s) + '">'
-      + (s === 'all' ? 'Semua' : esc(s)) + '</button>').join('')
-    + '</div>';
-
-  const slotsToRender = state.boardSlot === 'all' ? boardSlots() : [state.boardSlot];
-  let groups = '';
-  slotsToRender.forEach(slot => {
-    const list = ordersBySlot(slot).sort((a, b) => STATUS_ORDER.indexOf(b.status) - STATUS_ORDER.indexOf(a.status));
-    if (!list.length) return;
-    const ready = list.filter(o => o.status === 'ready').length;
-    groups += '<div class="board-group"><div class="board-head"><span class="board-head__slot">' + slot + '</span>'
-      + '<span class="board-head__count">' + list.length + ' order' + (ready ? ' · ' + ready + ' siap' : '') + '</span></div>'
-      + list.map(orderCardAdmin).join('') + '</div>';
+  /* Pesanan terbaru selalu di atas; id jadi pembeda bila created_at sama. */
+  const all = state.orders.slice().sort((a, b) => {
+    const ta = a.createdAt || '';
+    const tb = b.createdAt || '';
+    if (ta !== tb) return tb.localeCompare(ta);
+    return Number(b.id) - Number(a.id);
   });
+  const list = state.boardFilter === 'all' ? all : all.filter(o => o.status === state.boardFilter);
+  const active = BOARD_FILTERS.find(f => f.id === state.boardFilter) || BOARD_FILTERS[0];
 
-  if (!groups) {
-    groups = '<div class="empty" style="padding-top:var(--space-10)"><div class="empty__ic">' + icon('layout', 26) + '</div>'
-      + '<div><div style="font-weight:600;color:var(--foreground)">Tidak ada order di jam ini</div>'
-      + '<div style="font-size:13px;margin-top:4px">Coba pilih jam ambil lain.</div></div></div>';
-  }
-
-  const totalPaid = state.orders.filter(o => o.status === 'paid').length;
-  const summary = '<div class="od-grid" style="--od-cols:3;--od-gap:8px;margin-top:var(--space-3)">'
-    + statBox('Perlu disiapkan', totalPaid, 'var(--status-paid)')
-    + statBox('Siap diambil', state.orders.filter(o => o.status === 'ready').length, 'var(--status-ready)')
-    + statBox('Selesai', state.orders.filter(o => o.status === 'completed').length, 'var(--status-completed)')
+  const rail = '<div class="slot-rail" role="group" aria-label="Filter status pesanan" style="margin-top:var(--space-3)">'
+    + BOARD_FILTERS.map(f => '<button class="chip" data-action="admin-filter" data-filter="' + f.id + '" aria-pressed="' + (state.boardFilter === f.id) + '">'
+      + f.label + '</button>').join('')
     + '</div>';
 
-  return summary + '<div style="margin-top:var(--space-4)">' + rail + '</div>' + groups;
+  const summary = '<div class="od-grid" style="--od-cols:3;--od-gap:8px;margin-top:var(--space-3)">'
+    + statBox('Perlu disiapkan', all.filter(o => o.status === 'paid').length, 'var(--status-paid)')
+    + statBox('Siap diambil', all.filter(o => o.status === 'ready').length, 'var(--status-ready)')
+    + statBox('Selesai', all.filter(o => o.status === 'completed').length, 'var(--status-completed)')
+    + '</div>';
+
+  const head = '<div class="board-head" style="margin-top:var(--space-4)"><span class="board-head__slot">' + active.label + '</span>'
+    + '<span class="board-head__count">' + list.length + ' order</span></div>';
+
+  const cards = list.length
+    ? list.map(orderCardAdmin).join('')
+    : '<div class="empty" style="padding-top:var(--space-10)"><div class="empty__ic">' + icon('layout', 26) + '</div>'
+      + '<div><div style="font-weight:600;color:var(--foreground)">' + (state.boardFilter === 'all' ? 'Belum ada pesanan masuk' : 'Tidak ada order dengan status ini') + '</div>'
+      + '<div style="font-size:13px;margin-top:4px">' + (state.boardFilter === 'all' ? 'Pesanan baru muncul otomatis di sini.' : 'Coba pilih filter lain.') + '</div></div></div>';
+
+  return summary + '<div>' + rail + '</div>' + head + cards;
 }
 
 function viewStock() {
-  const lowCount = state.menu.filter(i => i.stock <= 5).length;
+  const lowCount = state.menu.filter(i => i.active && i.stock <= 5).length;
   const banner = lowCount
     ? '<div class="card" style="padding:var(--space-3);border-color:var(--status-pending);margin-top:var(--space-2);display:flex;gap:var(--space-3);align-items:center">'
       + '<span style="color:var(--status-pending);flex:none">' + icon('alert', 20) + '</span>'
@@ -747,12 +955,16 @@ function viewStock() {
   const rows = state.menu.map(i => {
     const out = i.stock <= 0;
     const low = !out && i.stock <= 5;
+    const badge = !i.active
+      ? '<span class="badge" style="color:var(--foreground-muted);background:var(--background-section)">Nonaktif</span>'
+      : out ? '<span class="badge" style="color:var(--status-cancelled);background:color-mix(in srgb,var(--status-cancelled) 14%,transparent)">Habis</span>'
+        : low ? '<span class="badge" style="color:var(--status-pending);background:color-mix(in srgb,var(--status-pending) 18%,transparent)">Rendah</span>' : '';
     return '<div class="stock-row"><img class="stock-row__img" src="' + i.img + '" width="' + i.w + '" height="' + i.h + '" alt="" />'
       + '<div class="stock-row__body"><div class="od-row"><div class="od-fill od-stack" style="--od-gap:2px">'
       + '<span style="font-weight:600;font-size:13.5px" class="od-clamp-2">' + esc(i.name) + '</span>'
       + '<span class="muted od-nowrap" style="font-size:12px">' + fmt(i.price) + ' · ' + i.cat + '</span></div>'
-      + (out ? '<span class="badge" style="color:var(--status-cancelled);background:color-mix(in srgb,var(--status-cancelled) 14%,transparent)">Habis</span>'
-          : low ? '<span class="badge" style="color:var(--status-pending);background:color-mix(in srgb,var(--status-pending) 18%,transparent)">Rendah</span>' : '')
+      + badge
+      + '<button class="iconbtn iconbtn--end" data-action="edit-menu" data-item="' + i.id + '" aria-label="Edit ' + esc(i.name) + '">' + icon('pencil', 18) + '</button>'
       + '</div>'
       + '<div class="od-row"><span class="od-fill" style="font-size:12px;color:var(--foreground-muted)">Stok tersedia</span>'
       + '<div class="stepper" role="group" aria-label="Stok ' + esc(i.name) + '">'
@@ -760,13 +972,133 @@ function viewStock() {
       + '<span class="stepper__val">' + i.stock + '</span>'
       + '<button class="stepper__btn" data-action="stock-inc" data-item="' + i.id + '" aria-label="Tambah stok ' + esc(i.name) + '">' + icon('plus', 17) + '</button>'
       + '</div></div>'
-      + (out ? '<div class="warn">' + icon('alert', 14) + 'Habis — segera restock</div>' : '')
+      + '<div class="od-row" style="margin-top:8px"><span class="od-fill" style="font-size:12px;color:var(--foreground-muted)">'
+      + (i.active ? 'Tampil di menu mahasiswa' : 'Disembunyikan dari menu') + '</span>'
+      + '<button class="btn ' + (i.active ? 'btn--secondary' : 'btn--primary') + ' btn--sm" data-action="toggle-menu" data-item="' + i.id + '">'
+      + (i.active ? 'Nonaktifkan' : 'Aktifkan') + '</button></div>'
+      + (out && i.active ? '<div class="warn">' + icon('alert', 14) + 'Habis — segera restock</div>' : '')
       + '</div></div>';
   }).join('');
-  return banner + '<div style="margin-top:var(--space-2)">' + rows + '</div>';
+  const head = '<div class="od-row" style="margin-top:var(--space-2)">'
+    + '<div class="section-title od-fill" style="margin:0">Daftar Menu</div>'
+    + '<button class="btn btn--primary btn--sm" data-action="new-menu">' + icon('plus', 16) + 'Tambah Menu</button></div>';
+  return banner + head + '<div style="margin-top:var(--space-3)">' + rows + '</div>';
+}
+
+/* ---------- Modal tambah/edit menu ---------- */
+function menuFormField(id, label, input) {
+  return '<div class="field"><label class="field__label" for="' + id + '">' + label + '</label>' + input + '</div>';
+}
+
+function viewMenuForm() {
+  const f = state.menuForm;
+  if (!f) return '';
+  const edit = f.mode === 'edit';
+  const it = edit ? item(f.id) : null;
+  if (edit && !it) return '';
+  const v = it
+    ? { name: it.name, desc: it.desc, cat: it.cat, price: it.price, stock: it.stock, image: it.imageUrl }
+    : { name: '', desc: '', cat: '', price: '', stock: 0, image: '' };
+  const catOptions = state.menu.map(i => i.cat).filter((c, i, all) => c && all.indexOf(c) === i);
+
+  const nameField = menuFormField('f-menu-nama', 'Nama menu <span class="field__req" aria-hidden="true">*</span>',
+    '<input class="input" id="f-menu-nama" name="menu-nama" type="text" maxlength="100" value="' + esc(v.name) + '" placeholder="Contoh: Nasi Goreng Spesial" required aria-required="true" autocomplete="off" />');
+
+  const priceField = menuFormField('f-menu-harga', 'Harga (Rp) <span class="field__req" aria-hidden="true">*</span>',
+    '<input class="input" id="f-menu-harga" name="menu-harga" type="number" min="1" step="1" value="' + esc(v.price) + '" placeholder="25000" required aria-required="true" inputmode="numeric" />');
+
+  const stockField = edit ? '' : menuFormField('f-menu-stok', 'Stok awal',
+    '<input class="input" id="f-menu-stok" name="menu-stok" type="number" min="0" step="1" value="' + esc(v.stock) + '" placeholder="0" inputmode="numeric" />');
+
+  const catField = menuFormField('f-menu-kategori', 'Kategori',
+    '<input class="input" id="f-menu-kategori" name="menu-kategori" type="text" maxlength="50" value="' + esc(v.cat) + '" placeholder="Contoh: Makanan Utama" list="menu-kategori-list" autocomplete="off" />'
+    + '<datalist id="menu-kategori-list">' + catOptions.map(c => '<option value="' + esc(c) + '"></option>').join('') + '</datalist>');
+
+  const descField = menuFormField('f-menu-desc', 'Deskripsi',
+    '<textarea class="input" id="f-menu-desc" name="menu-desc" rows="3" maxlength="255" style="resize:vertical;font-family:inherit" placeholder="Deskripsi singkat menu">' + esc(v.desc) + '</textarea>');
+
+  const imageField = '<div class="field"><label class="field__label">Foto menu</label>'
+    + '<div class="menu-upload"><img class="menu-preview" id="menu-image-preview" src="' + esc(menuImage(v.image)) + '" width="64" height="64" alt="Pratinjau foto menu" />'
+    + '<div class="od-fill od-stack" style="--od-gap:6px">'
+    + '<span class="menu-upload__name" id="menu-image-name">' + (v.image ? esc(v.image.split('/').pop()) : 'Belum ada foto') + '</span>'
+    + '<div class="od-row" style="--od-gap:6px">'
+    + '<button type="button" class="btn btn--secondary btn--sm" data-action="pick-menu-image">' + icon('upload', 16) + 'Upload</button>'
+    + '<button type="button" class="btn btn--secondary btn--sm" data-action="capture-menu-image">' + icon('camera', 16) + 'Kamera</button>'
+    + '</div></div></div>'
+    + '<input type="file" id="f-menu-image-file" accept="image/jpeg,image/png,image/webp" hidden />'
+    + '<input type="file" id="f-menu-camera" accept="image/*" capture="environment" hidden />'
+    + '<div class="note" style="padding:0">' + icon('info', 14) + '<span>JPG, PNG, atau WebP, maksimal 5 MB. Foto dari kamera langsung bisa dipakai.</span></div></div>';
+
+  const err = '<div id="menu-form-error">'
+    + (f.error ? '<div class="field__error" role="alert">' + icon('alert', 15) + '<span>' + esc(f.error) + '</span></div>' : '')
+    + '</div>';
+
+  return '<div class="modal-backdrop" data-action="close-menu-form"></div>'
+    + '<form class="modal-sheet" id="menu-form" role="dialog" aria-modal="true" aria-labelledby="menu-form-title" novalidate>'
+    + '<div class="modal-sheet__head"><div class="od-fill od-stack" style="--od-gap:2px">'
+    + '<span class="modal-sheet__eyebrow">' + (edit ? 'Edit menu' : 'Menu baru') + '</span>'
+    + '<span class="modal-sheet__title" id="menu-form-title">' + (edit ? esc(it.name) : 'Tambah Menu') + '</span></div>'
+    + '<button type="button" class="iconbtn iconbtn--end" data-action="close-menu-form" aria-label="Tutup">' + icon('x', 20) + '</button></div>'
+    + '<div class="modal-sheet__body">'
+    + nameField
+    + (edit
+      ? priceField
+      : '<div class="od-grid" style="--od-cols:2;--od-gap:var(--space-3)">' + priceField + stockField + '</div>')
+    + catField + descField + imageField
+    + err
+    + '</div>'
+    + '<div class="modal-sheet__foot">'
+    + '<button type="button" class="btn btn--secondary" data-action="close-menu-form">Batal</button>'
+    + '<button type="submit" class="btn btn--primary" data-action="save-menu">'
+    + icon(edit ? 'check' : 'plus', 18) + (edit ? 'Simpan Perubahan' : 'Tambah Menu') + '</button></div>'
+    + '</form>';
+}
+
+function renderMenuForm(force) {
+  const root = $('modal');
+  if (!root) return;
+  if (!state.menuForm) {
+    if (root.hidden || root.classList.contains('is-closing')) return;
+    if (reducedMotion()) { resetMenuForm(root); return; }
+    root.classList.add('is-closing');
+    setTimeout(() => { if (!state.menuForm) resetMenuForm(root); }, LEAVE_MS);
+    return;
+  }
+  root.classList.remove('is-closing');
+  /* Jangan render ulang saat polling supaya isian form tidak hilang. */
+  const key = state.menuForm.mode + ':' + (state.menuForm.id || '');
+  if (!force && !root.hidden && root.dataset.form === key) return;
+  const html = viewMenuForm();
+  root.innerHTML = html;
+  root.dataset.form = key;
+  root.hidden = !html;
+}
+
+function resetMenuForm(root) {
+  root.innerHTML = '';
+  root.hidden = true;
+  root.dataset.form = '';
+  root.classList.remove('is-closing');
+}
+
+function showMenuFormError(message) {
+  const box = $('menu-form-error');
+  if (box) {
+    box.innerHTML = message
+      ? '<div class="field__error" role="alert">' + icon('alert', 15) + '<span>' + esc(message) + '</span></div>'
+      : '';
+  }
 }
 
 /* ---------- Render ---------- */
+function enterScreen() {
+  const s = $('screen');
+  if (!s) return;
+  s.classList.add('is-entering');
+  clearTimeout(enterScreen._t);
+  enterScreen._t = setTimeout(() => s.classList.remove('is-entering'), 700);
+}
+
 function renderView() {
   const map = {
     auth: viewAuth, menu: viewMenu, cart: viewCart, payment: viewPayment, success: viewSuccess,
@@ -781,6 +1113,7 @@ function renderView() {
   s.innerHTML = state.loading ? skeleton() : (map[PAGE] || viewMenu)();
   renderCartbar();
   renderTabbar();
+  renderMenuForm();
   $('app').setAttribute('data-route', PAGE);
   s.scrollTop = top;
   persist();
@@ -788,15 +1121,38 @@ function renderView() {
 
 /* ---------- Actions ---------- */
 /* ---------- Data + aksi ke API ---------- */
+const dataLoaded = { menu: false, orders: false };
+
+function pageNeeds(page) {
+  return {
+    menu: ['menu', 'cart', 'payment', 'stock'].includes(page),
+    orders: ['orders', 'tracking', 'success', 'board'].includes(page)
+  };
+}
+
+/* Dipakai untuk melewati render ulang saat data hasil refresh tidak berubah. */
+function dataSignature(page) {
+  const needs = pageNeeds(page);
+  return (needs.menu ? JSON.stringify(state.menu) : '')
+    + '|' + (needs.orders ? JSON.stringify(state.orders) : '');
+}
+
 async function loadData() {
-  const needsMenu = ['menu', 'cart', 'payment', 'stock'].includes(PAGE);
-  const needsOrders = ['orders', 'tracking', 'success'].includes(PAGE)
-    ? '/orders/me'
-    : (PAGE === 'board' ? '/admin/orders' : null);
+  const needs = pageNeeds(PAGE);
 
   const jobs = [];
-  if (needsMenu) jobs.push(api('/menus').then(rows => { state.menu = rows.map(mapMenu); }));
-  if (needsOrders) jobs.push(api(needsOrders).then(rows => { state.orders = rows.map(mapOrder); }));
+  if (needs.menu) {
+    jobs.push(api(PAGE === 'stock' ? '/admin/menus' : '/menus').then(rows => {
+      state.menu = rows.map(mapMenu);
+      dataLoaded.menu = true;
+    }));
+  }
+  if (needs.orders) {
+    jobs.push(api(PAGE === 'board' ? '/admin/orders' : '/orders/me').then(rows => {
+      state.orders = rows.map(mapOrder);
+      dataLoaded.orders = true;
+    }));
+  }
   await Promise.all(jobs);
 }
 
@@ -809,6 +1165,11 @@ function setSession(token, user) {
     email: user.email,
     role: user.role
   };
+  /* Jangan bawa cache data milik sesi sebelumnya ke akun yang baru login. */
+  state.menu = [];
+  state.orders = [];
+  dataLoaded.menu = false;
+  dataLoaded.orders = false;
   auth.save(token, state.user);
 }
 
@@ -876,23 +1237,21 @@ async function doPay() {
   const btn = document.querySelector('[data-action="pay"]');
   if (btn) btn.disabled = true;
 
-  const now = new Date();
-  // Kalau jam ambil sudah lewat hari ini, pesanan jatuh ke besok.
-  const slotMin = parseInt(state.pickup.slice(0, 2), 10) * 60 + parseInt(state.pickup.slice(3, 5), 10);
-  if (slotMin <= now.getHours() * 60 + now.getMinutes()) now.setDate(now.getDate() + 1);
-  const ymd = now.getFullYear() + '-'
-    + String(now.getMonth() + 1).padStart(2, '0') + '-'
-    + String(now.getDate()).padStart(2, '0');
-
   try {
+    const pickup = plannedPickup();
     const res = await api('/orders', {
       method: 'POST',
-      body: { items: items, pickup_at: ymd + 'T' + state.pickup + ':00' }
+      body: {
+        items: items,
+        pickup_at: pickup.date + 'T' + pickup.time + ':00',
+        catatan: state.note && state.note.trim() ? state.note.trim() : null
+      }
     });
 
     state.lastOrderId = String(res.id);
     state.cart = {};
     state.pickup = null;
+    state.note = null;
 
     // Sinkronkan stok menu + riwayat pesanan setelah order dibuat.
     try {
@@ -900,11 +1259,50 @@ async function doPay() {
       state.orders = (await api('/orders/me')).map(mapOrder);
     } catch (e) { /* pakai data lama */ }
 
-    navigate('success', { replace: true, flash: { msg: 'Pesanan dibuat · ' + res.order_code, ic: 'checkCircle' } });
+    const done = (msg, ic) => navigate('success', { replace: true, flash: { msg: msg, ic: ic } });
+
+    let cfg = null;
+    try { cfg = await api('/payments/config'); } catch (e) { /* gateway opsional */ }
+
+    if (!cfg || !cfg.enabled || !res.payment_token || /^dummy-/.test(res.payment_token)) {
+      // ponytail: Midtrans belum dikonfigurasi -> anggap pesanan menunggu konfirmasi manual.
+      done('Pesanan dibuat · ' + res.order_code, 'checkCircle');
+      return;
+    }
+
+    try { await loadSnap(cfg); } catch (e) {
+      done('Pesanan dibuat, gateway pembayaran gagal dimuat', 'alert');
+      return;
+    }
+
+    window.snap.pay(res.payment_token, {
+      onSuccess: () => done('Pembayaran berhasil · ' + res.order_code, 'checkCircle'),
+      onPending: () => done('Pembayaran menunggu penyelesaian · ' + res.order_code, 'info'),
+      onError: () => {
+        toast('Pembayaran gagal. Coba lagi dari halaman Pesanan.', 'alert');
+        navigate('orders');
+      },
+      onClose: () => navigate('orders', { flash: { msg: 'Pembayaran belum selesai', ic: 'info' } })
+    });
   } catch (e) {
     if (btn) btn.disabled = false;
     toast(e.message, 'alert');
   }
+}
+
+let snapPromise = null;
+function loadSnap(cfg) {
+  if (window.snap) return Promise.resolve();
+  if (snapPromise) return snapPromise;
+  snapPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = (cfg.is_production ? 'https://app.midtrans.com' : 'https://app.sandbox.midtrans.com') + '/snap/snap.js';
+    s.setAttribute('data-client-key', cfg.client_key);
+    s.onload = () => resolve();
+    s.onerror = () => { snapPromise = null; reject(new Error('Gagal memuat Snap')); };
+    document.head.appendChild(s);
+  });
+  return snapPromise;
 }
 
 async function updateOrderStatus(id, status, message) {
@@ -927,6 +1325,244 @@ async function setMenuStock(id, stock) {
     renderView();
   } catch (e) {
     toast(e.message, 'alert');
+  }
+}
+
+async function setMenuActive(id, active) {
+  const it = item(id);
+  if (!it) return;
+  try {
+    await api('/admin/menus/' + id, { method: 'PATCH', body: { is_active: active } });
+    it.active = active;
+    renderView();
+    toast(active ? 'Menu diaktifkan.' : 'Menu dinonaktifkan.', 'checkCircle');
+  } catch (e) {
+    toast(e.message, 'alert');
+  }
+}
+
+let cameraStream = null;
+
+function openMenuForm(mode, id) {
+  if (mode === 'edit' && !item(id)) return;
+  closeCamera();
+  state.menuForm = { mode: mode, id: id || null, error: null, imageFile: null };
+  renderMenuForm(true);
+  const first = $('f-menu-nama');
+  if (first) first.focus();
+}
+
+function releaseMenuPreview() {
+  const preview = $('menu-image-preview');
+  if (preview && preview.dataset.objectUrl) {
+    URL.revokeObjectURL(preview.dataset.objectUrl);
+    delete preview.dataset.objectUrl;
+  }
+}
+
+function closeMenuForm() {
+  closeCamera();
+  releaseMenuPreview();
+  state.menuForm = null;
+  renderMenuForm();
+}
+
+function setMenuImageFile(file, fromCamera) {
+  const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+  if (allowed.indexOf(file.type) === -1) {
+    toast('Format foto harus JPG, PNG, atau WebP.', 'alert');
+    return false;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    toast('Ukuran foto maksimal 5 MB.', 'alert');
+    return false;
+  }
+
+  if (state.menuForm) state.menuForm.imageFile = fromCamera ? file : null;
+  if (fromCamera) {
+    ['f-menu-image-file', 'f-menu-camera'].forEach(id => { const el = $(id); if (el) el.value = ''; });
+  }
+
+  const preview = $('menu-image-preview');
+  if (preview) {
+    if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+    const url = URL.createObjectURL(file);
+    preview.dataset.objectUrl = url;
+    preview.src = url;
+  }
+  const label = $('menu-image-name');
+  if (label) label.textContent = file.name;
+  return true;
+}
+
+function handleMenuImageFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (!setMenuImageFile(file, false)) {
+    input.value = '';
+    return;
+  }
+  const other = $(input.id === 'f-menu-image-file' ? 'f-menu-camera' : 'f-menu-image-file');
+  if (other) other.value = '';
+}
+
+function isMobileCamera() {
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+    || (navigator.maxTouchPoints > 1 && /Mac/i.test(navigator.platform || ''));
+}
+
+/* Di desktop, input capture hanya membuka folder. getUM memberi pratinjau kamera asli. */
+function fallbackCamera(message) {
+  if (isMobileCamera()) {
+    const el = $('f-menu-camera');
+    if (el) { el.click(); return; }
+  }
+  toast(message || 'Kamera tidak tersedia. Gunakan tombol Upload.', 'alert');
+}
+
+function renderCamera() {
+  const root = $('camera');
+  if (!root) return;
+  root.innerHTML = '<div class="modal-backdrop" data-action="close-camera"></div>'
+    + '<div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="camera-title">'
+    + '<div class="modal-sheet__head"><div class="od-fill od-stack" style="--od-gap:2px">'
+    + '<span class="modal-sheet__eyebrow">Foto menu</span>'
+    + '<span class="modal-sheet__title" id="camera-title">Ambil dari kamera</span></div>'
+    + '<button type="button" class="iconbtn iconbtn--end" data-action="close-camera" aria-label="Tutup">' + icon('x', 20) + '</button></div>'
+    + '<div class="modal-sheet__body">'
+    + '<video class="camera-preview" id="camera-video" autoplay playsinline muted></video>'
+    + '<div class="note" style="padding:0">' + icon('info', 14) + '<span>Dekatkan kamera ke menu, lalu tekan Ambil Foto.</span></div>'
+    + '</div>'
+    + '<div class="modal-sheet__foot">'
+    + '<button type="button" class="btn btn--secondary" data-action="close-camera">Batal</button>'
+    + '<button type="button" class="btn btn--primary" id="camera-shutter" data-action="snap-camera" disabled>' + icon('camera', 18) + 'Ambil Foto</button>'
+    + '</div></div>';
+  root.hidden = false;
+}
+
+function openCamera() {
+  if (!state.menuForm) return;
+  const root = $('camera');
+  if (!root || !root.hidden) return;
+
+  renderCamera();
+
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    closeCamera();
+    fallbackCamera('Kamera langsung butuh HTTPS atau localhost. Gunakan tombol Upload.');
+    return;
+  }
+
+  navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } }
+  }).then(stream => {
+    if (!state.menuForm || root.hidden) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
+    cameraStream = stream;
+    const video = $('camera-video');
+    if (!video) { closeCamera(); return; }
+    const enable = () => { const btn = $('camera-shutter'); if (btn) btn.disabled = false; };
+    video.addEventListener('loadedmetadata', enable, { once: true });
+    video.srcObject = stream;
+    const played = video.play();
+    if (played && played.catch) played.catch(() => {});
+    if (video.readyState >= 1) enable();
+  }).catch(err => {
+    closeCamera();
+    const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+    fallbackCamera(denied
+      ? 'Izin kamera ditolak. Gunakan tombol Upload untuk memilih foto.'
+      : 'Kamera tidak tersedia di perangkat ini.');
+  });
+}
+
+function closeCamera() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+  }
+  const root = $('camera');
+  if (!root || root.hidden || root.classList.contains('is-closing')) return;
+  if (reducedMotion()) { resetCamera(root); return; }
+  root.classList.add('is-closing');
+  setTimeout(() => { if (root.classList.contains('is-closing')) resetCamera(root); }, LEAVE_MS);
+}
+
+function resetCamera(root) {
+  root.innerHTML = '';
+  root.hidden = true;
+  root.classList.remove('is-closing');
+}
+
+function snapCamera() {
+  const video = $('camera-video');
+  if (!video || !cameraStream || !video.videoWidth) {
+    toast('Kamera belum siap. Tunggu sebentar lalu coba lagi.', 'alert');
+    return;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  canvas.toBlob(blob => {
+    if (!blob) { toast('Gagal mengambil foto.', 'alert'); return; }
+    const file = new File([blob], 'foto-menu-' + Date.now() + '.jpg', { type: 'image/jpeg' });
+    if (!setMenuImageFile(file, true)) return;
+    closeCamera();
+    toast('Foto siap dipakai.', 'checkCircle');
+  }, 'image/jpeg', 0.92);
+}
+
+async function saveMenuForm() {
+  const form = $('menu-form');
+  if (!form) return;
+  if (!form.checkValidity()) { form.reportValidity(); return; }
+
+  const f = state.menuForm;
+  if (!f) return;
+  showMenuFormError('');
+  const btn = form.querySelector('[data-action="save-menu"]');
+  if (btn) btn.disabled = true;
+
+  const fileInput = $('f-menu-image-file');
+  const cameraInput = $('f-menu-camera');
+  const newFile = f.imageFile || (fileInput && fileInput.files[0]) || (cameraInput && cameraInput.files[0]) || null;
+  const current = f.mode === 'edit' ? item(f.id) : null;
+
+  const payload = {
+    nama: $('f-menu-nama').value.trim(),
+    deskripsi: $('f-menu-desc').value.trim() || null,
+    kategori: $('f-menu-kategori').value.trim() || null,
+    harga: Math.round(Number($('f-menu-harga').value)),
+    image_url: current ? (current.imageUrl || null) : null
+  };
+  if (f.mode === 'create') payload.stok = Math.max(0, Math.round(Number($('f-menu-stok').value || 0)));
+
+  try {
+    if (newFile) {
+      const fd = new FormData();
+      fd.append('image', newFile);
+      const uploaded = await api('/admin/menus/upload', { method: 'POST', body: fd });
+      payload.image_url = uploaded.image_url;
+    }
+    if (f.mode === 'create') {
+      await api('/admin/menus', { method: 'POST', body: payload });
+    } else {
+      await api('/admin/menus/' + f.id, { method: 'PATCH', body: payload });
+    }
+    state.menu = (await api('/admin/menus')).map(mapMenu);
+    releaseMenuPreview();
+    state.menuForm = null;
+    renderView();
+    toast(f.mode === 'create' ? 'Menu baru ditambahkan.' : 'Menu berhasil diperbarui.', 'checkCircle');
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    state.menuForm.error = e.message;
+    showMenuFormError(e.message);
   }
 }
 
@@ -998,7 +1634,7 @@ function handle(action, el) {
       toast('Status pesanan hanya bisa diubah oleh admin kantin.', 'info');
       return;
 
-    case 'admin-filter': state.boardSlot = d.slot; renderView(); return;
+    case 'admin-filter': state.boardFilter = d.filter; renderView(); return;
     case 'admin-confirm': {
       const o = orderById(d.order);
       updateOrderStatus(d.order, 'paid', 'Pembayaran ' + (o ? o.code : d.order) + ' dikonfirmasi.');
@@ -1022,6 +1658,23 @@ function handle(action, el) {
       if (it && it.stock > 0) setMenuStock(d.item, it.stock - 1);
       return;
     }
+    case 'toggle-menu': {
+      const it = item(d.item);
+      if (it) setMenuActive(d.item, !it.active);
+      return;
+    }
+    case 'new-menu': openMenuForm('create'); return;
+    case 'edit-menu': openMenuForm('edit', d.item); return;
+    case 'close-menu-form': closeMenuForm(); return;
+    case 'save-menu': saveMenuForm(); return;
+    case 'pick-menu-image': {
+      const el = $('f-menu-image-file');
+      if (el) el.click();
+      return;
+    }
+    case 'capture-menu-image': openCamera(); return;
+    case 'close-camera': closeCamera(); return;
+    case 'snap-camera': snapCamera(); return;
   }
 }
 
@@ -1040,18 +1693,9 @@ function mountShell() {
     + '<nav class="tabbar" id="tabbar" aria-label="Navigasi utama"></nav>'
     + '</div>'
     + '</main>'
+    + '<div class="modal-root" id="modal" hidden></div>'
+    + '<div class="modal-root modal-root--camera" id="camera" hidden></div>'
     + '<div class="toast" id="toast" role="status" aria-live="polite" data-show="false"></div>'
-    + '<div class="status-bar" aria-hidden="true">'
-    + '<span class="status-time">13:45</span>'
-    + '<span class="status-cutout-zone"></span>'
-    + '<span class="status-icons">'
-    + '<svg class="connectivity" viewBox="0 0 15 12"><path d="M1.5 10.5v-2m4 2v-4.5m4 4.5v-7m4 7v-9"/></svg>'
-    + '<svg class="wifi" viewBox="0 0 16 12"><path d="M1.5 4.7a9.2 9.2 0 0 1 13 0M4.2 7.3a5.4 5.4 0 0 1 7.6 0M6.9 10a1.55 1.55 0 0 1 2.2 0"/></svg>'
-    + '<svg class="battery" viewBox="0 0 20 11"><rect x=".75" y="1.25" width="16.5" height="8.5" rx="2"/><path d="M18.5 4v3M3.2 3.4h10.4v4.2H3.2z" fill="currentColor" stroke="none"/></svg>'
-    + '</span>'
-    + '</div>'
-    + '<div class="camera-dot" aria-hidden="true"></div>'
-    + '<div class="gesture-indicator" aria-hidden="true"></div>'
     + '</section>'
     + '</div>'
   );
@@ -1090,22 +1734,85 @@ document.addEventListener('input', e => {
     renderView();
     const s = $('search');
     if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
+    return;
   }
+  if (e.target.id === 'note') {
+    state.note = e.target.value;
+  }
+});
+document.addEventListener('change', e => {
+  if (e.target.id === 'f-menu-image-file' || e.target.id === 'f-menu-camera') {
+    handleMenuImageFile(e.target);
+  }
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const camera = $('camera');
+  if (camera && !camera.hidden) {
+    e.preventDefault();
+    closeCamera();
+    return;
+  }
+  if (state.menuForm) {
+    e.preventDefault();
+    closeMenuForm();
+  }
+});
+window.addEventListener('popstate', () => {
+  goToRoute(pageFromPath(location.pathname), { history: 'none' });
+});
+window.addEventListener('pagehide', () => {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+  }
+});
+window.addEventListener('pageshow', () => {
+  const app = $('app');
+  if (app) app.classList.remove('is-leaving');
 });
 
 /* ---------- Boot ---------- */
-const ADMIN_ONLY = ['board', 'stock', 'accountAdmin', 'profilKantin', 'jamOperasional'];
-const STUDENT_PAGES = ['menu', 'cart', 'payment', 'success', 'orders', 'tracking', 'accountStudent'];
+let refreshing = false;
+async function refreshData() {
+  const page = PAGE;
+  if (refreshing || document.hidden || !state.role || !REFRESH_PAGES.includes(page)) return;
+  refreshing = true;
+  try {
+    await loadData();
+    if (page === PAGE) renderView();
+  } catch (e) {
+    /* data lama tetap tampil; toast hanya untuk aksi pengguna */
+  } finally {
+    refreshing = false;
+  }
+}
+
+let pollTimer = null;
+function schedulePolling() {
+  clearInterval(pollTimer);
+  pollTimer = null;
+  if (!POLL_PAGES.includes(PAGE)) return;
+  pollTimer = setInterval(refreshData, ['board', 'orders', 'tracking'].includes(PAGE) ? 30000 : 60000);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) closeCamera();
+  else refreshData();
+});
 
 function skeleton() {
   return '<div style="padding-top:var(--space-6);display:grid;gap:var(--space-3)">'
-    + '<div class="card" style="height:88px;opacity:.5"></div>'
-    + '<div class="card" style="height:88px;opacity:.5"></div>'
+    + '<div class="card skeleton-card" style="height:88px"></div>'
+    + '<div class="card skeleton-card" style="height:88px"></div>'
     + '<div class="muted" style="text-align:center;font-size:13px">Memuat data…</div></div>';
 }
 
 async function boot() {
   mountShell();
+
+  const depth = (history.state && Number(history.state.depth)) || 0;
+  history.replaceState({ page: PAGE, depth: depth }, '', location.href);
 
   /* Sesi lama dari localStorage divalidasi ulang ke server. */
   if (auth.token()) {
@@ -1127,15 +1834,16 @@ async function boot() {
   }
 
   if (PAGE === 'auth') {
-    if (state.role) { location.replace(state.role === 'admin' ? PAGES.board : PAGES.menu); return; }
+    if (state.role) { goToRoute(roleHome(), { replace: true }); return; }
     renderView();
-    if (state.flash) { toast(state.flash.msg, state.flash.ic); state.flash = null; persist(); }
+    enterScreen();
+    showFlash();
     return;
   }
 
-  if (!state.role) { location.replace(PAGES.auth); return; }
-  if (ADMIN_ONLY.includes(PAGE) && state.role !== 'admin') { location.replace(PAGES.menu); return; }
-  if (state.role === 'admin' && STUDENT_PAGES.includes(PAGE)) { location.replace(PAGES.board); return; }
+  if (!state.role) { goToRoute('auth', { replace: true }); return; }
+  if (ADMIN_ONLY.includes(PAGE) && state.role !== 'admin') { goToRoute(roleHome(), { replace: true }); return; }
+  if (state.role === 'admin' && STUDENT_PAGES.includes(PAGE)) { goToRoute('board', { replace: true }); return; }
 
   state.loading = true;
   renderView();
@@ -1143,11 +1851,12 @@ async function boot() {
     await loadData();
   } catch (e) {
     toast(e.message, 'alert');
-  } finally {
-    state.loading = false;
-    renderView();
-    if (state.flash) { toast(state.flash.msg, state.flash.ic); state.flash = null; persist(); }
   }
+  state.loading = false;
+  renderView();
+  enterScreen();
+  showFlash();
+  schedulePolling();
 }
 
 boot();

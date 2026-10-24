@@ -12,6 +12,7 @@ require_once __DIR__ . '/../controllers/orders.php';
 require_once __DIR__ . '/../controllers/payments.php';
 require_once __DIR__ . '/../controllers/admin_menus.php';
 require_once __DIR__ . '/../controllers/admin_orders.php';
+require_once __DIR__ . '/../controllers/uploads.php';
 
 set_cors_headers();
 
@@ -34,10 +35,14 @@ $routes = [
     ['POST',   '#^/api/orders$#',                      'orders_create'],
     ['GET',    "#^/api/orders/$id$#",                  'orders_detail'],
     ['POST',   '#^/api/payments/webhook$#',            'payments_webhook'],
+    ['GET',    '#^/api/payments/config$#',             'payments_config'],
     ['POST',   '#^/api/admin/menus$#',                 'admin_menu_create'],
+    ['GET',    '#^/api/admin/menus$#',                  'admin_menus_all'],
+    ['POST',   '#^/api/admin/menus/upload$#',          'admin_menu_upload'],
     ['GET',    "#^/api/admin/menus/$id$#",             'admin_menu_detail'],
     ['PATCH',  "#^/api/admin/menus/$id$#",             'admin_menu_update'],
     ['PATCH',  "#^/api/admin/menus/$id/stock$#",       'admin_menu_stock'],
+    ['GET',    '#^/api/uploads/([A-Za-z0-9._-]+)$#',   'upload_serve'],
     ['GET',    '#^/api/admin/orders$#',                'admin_orders_all'],
     ['PATCH',  "#^/api/admin/orders/$id/status$#",     'admin_order_status'],
 ];

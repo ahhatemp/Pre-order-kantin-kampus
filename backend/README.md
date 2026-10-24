@@ -41,11 +41,12 @@ backend/
 ├── helpers.php            JSON response, body parsing, CORS
 ├── auth.php               JWT HS256 + authenticate/require_role
 ├── rate_limit.php         rate limiter berbasis file
-├── controllers/           auth, menus, orders, payments, admin_*
+├── controllers/           auth, menus, orders, payments, admin_*, uploads
 ├── services/              order (transaksi), order_expiry (sweep), midtrans
 ├── migrations/*.sql       skema per tabel (dipakai migrate.php)
 ├── schema.sql             skema + data awal (import sekali)
 ├── migrate.php            CLI: apply migrations + seed
+├── storage/uploads/       foto menu hasil upload (runtime)
 └── tests/jwt_test.php     self-check JWT & rate limiter
 ```
 
@@ -66,6 +67,8 @@ backend/
 | GET | `/api/admin/menus/{id}` | admin | detail menu |
 | PATCH | `/api/admin/menus/{id}` | admin | ubah menu |
 | PATCH | `/api/admin/menus/{id}/stock` | admin | ubah stok |
+| POST | `/api/admin/menus/upload` | admin | upload foto menu (multipart `image`, maks 5 MB) |
+| GET | `/api/uploads/{file}` | - | serve foto menu hasil upload |
 | GET | `/api/admin/orders` | admin | daftar pesanan (`?pickup_date=`) |
 | PATCH | `/api/admin/orders/{id}/status` | admin | ubah status |
 
@@ -117,4 +120,10 @@ Urutan script di tiap HTML wajib: `js/api.js` lalu `js/app.js`.
 
 ```bash
 php tests/jwt_test.php
+```
+
+## Reset password (development)
+
+```bash
+php reset_password.php user@kantin.com password123
 ```

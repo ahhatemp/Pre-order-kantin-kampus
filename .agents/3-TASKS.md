@@ -56,10 +56,12 @@ Stack aktual: PHP native + PDO/MySQL, frontend HTML/CSS/JS tanpa build step, Mid
 - **Catatan:** belum ada jadwal menu per tanggal.
 
 ### T-08: API admin menu & stok — Selesai
-- **Bukti:** `backend/controllers/admin_menus.php`.
+- **Bukti:** `backend/controllers/admin_menus.php`, `backend/controllers/uploads.php`.
 - **Fitur:** `POST /api/admin/menus`, `GET /api/admin/menus`, `GET /api/admin/menus/{id}`,
-  `PATCH /api/admin/menus/{id}` (termasuk `is_active`), `PATCH /api/admin/menus/{id}/stock`.
+  `PATCH /api/admin/menus/{id}` (termasuk `is_active`), `PATCH /api/admin/menus/{id}/stock`,
+  `POST /api/admin/menus/upload` (multipart JPG/PNG/WebP ≤ 5 MB), `GET /api/uploads/{file}`.
 - **Catatan:** "hapus" dilakukan dengan menonaktifkan menu (`is_active = 0`), bukan hard delete.
+  Foto upload disimpan acak di `backend/storage/uploads/` dan disajikan lewat API.
 
 ---
 
@@ -121,7 +123,9 @@ Stack aktual: PHP native + PDO/MySQL, frontend HTML/CSS/JS tanpa build step, Mid
 ### T-17: UI admin — Selesai
 - **Bukti:** `frontend/admin-pesanan.html`, `frontend/admin-stok.html`, `frontend/js/app.js`.
 - **Fitur:** papan pesanan per slot/tanggal, tombol Siap/Selesai/Batal, kelola stok dan status
-  aktif menu, refresh 30 detik.
+  aktif menu, tambah/edit menu lewat bottom sheet (nama, harga, kategori, deskripsi, foto),
+  unggah foto dari galeri atau kamera langsung (`getUserMedia` + canvas, fallback `capture` di HP)
+  dengan pratinjau dan validasi tipe/ukuran, refresh 30 detik.
 
 ### T-18: Security & performance — Sebagian
 - **Sudah:** rate limit order, JWT + role guard, prepared statement, transaksi anti-oversell,

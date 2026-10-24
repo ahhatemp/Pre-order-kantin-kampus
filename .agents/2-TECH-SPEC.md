@@ -48,7 +48,8 @@ backend/
 ├── rate_limit.php           sliding window berbasis file
 ├── controllers/
 │   ├── auth.php  menus.php  orders.php  payments.php
-│   └── admin_menus.php  admin_orders.php
+│   ├── admin_menus.php  admin_orders.php
+│   └── uploads.php          upload foto menu + serve file
 ├── services/
 │   ├── order.php            transaksi pembuatan order
 │   ├── order_expiry.php     sweep order kedaluwarsa
@@ -57,6 +58,7 @@ backend/
 ├── schema.sql               skema + seed untuk import phpMyAdmin
 ├── migrate.php              CLI: buat DB + jalankan migrations
 ├── storage/                 rate limit + lock sweep (runtime)
+│   └── uploads/             foto menu hasil upload (runtime, di-.gitignore)
 ├── tests/jwt_test.php
 ├── .env.example
 └── .htaccess
@@ -73,7 +75,7 @@ frontend/
 ├── css/styles.css           design tokens + komponen
 ├── js/api.js                lapisan HTTP, auth, mapper
 ├── js/app.js                state, render semua layar, aksi
-└── assets/                  gambar menu
+└── assets/                  gambar menu bawaan
 
 .agents/                     PRD, tech spec, tasks, design
 Desain-Berdasarkan-PRD-dan-DESIGN/   desain mentah (referensi)
@@ -170,6 +172,8 @@ Index: `idx_order_id`.
 | GET | `/api/admin/menus/{id}` | admin | Detail menu |
 | PATCH | `/api/admin/menus/{id}` | admin | Ubah field menu |
 | PATCH | `/api/admin/menus/{id}/stock` | admin | Ubah stok |
+| POST | `/api/admin/menus/upload` | admin | Upload foto menu (multipart `image`, JPG/PNG/WebP ≤ 5 MB) |
+| GET | `/api/uploads/{file}` | — | Serve foto menu hasil upload |
 | GET | `/api/admin/orders` | admin | Daftar pesanan (`?pickup_date=YYYY-MM-DD`) |
 | PATCH | `/api/admin/orders/{id}/status` | admin | Ubah status pesanan |
 
@@ -325,7 +329,7 @@ PHP tidak memiliki proses latar seperti `setInterval`, jadi sweep dijalankan di 
 | `lacak.html` | `tracking` | mahasiswa | Timeline status pesanan |
 | `akun-mahasiswa.html` | `accountStudent` | mahasiswa | Profil & menu akun |
 | `admin-pesanan.html` | `board` | admin | Papan pesanan per slot/tanggal |
-| `admin-stok.html` | `stock` | admin | Kelola stok & status menu |
+| `admin-stok.html` | `stock` | admin | Kelola stok, status, tambah & edit menu |
 | `akun-admin.html` | `accountAdmin` | admin | Profil admin |
 | `notifikasi.html`, `bantuan.html`, `tentang.html` | sub-halaman | keduanya | Halaman informasi |
 | `profil-kantin.html`, `jam-operasional.html` | sub-halaman | admin | Info kantin |
@@ -351,6 +355,15 @@ Setiap HTML memuat `js/api.js` lalu `js/app.js` (urutan wajib), dan menandai hal
   untuk besok.
 - Polling data: halaman `board`, `orders`, `tracking` setiap 30 detik; `menu`, `stock` setiap
   60 detik; refresh juga terjadi saat tab kembali aktif.
+- Admin menambah/mengedit menu lewat bottom sheet di halaman `stock` (`POST`/`PATCH`
+  `/api/admin/menus`); render ulang modal dilewati saat polling agar isian tidak hilang.
+- Foto menu hanya lewat unggah file atau kamera, bukan isian nama file. Tombol Kamera membuka
+  pratinjau `getUserMedia` di bottom sheet, lalu hasil frame diambil lewat canvas sebagai JPEG.
+  Jika kamera tidak tersedia/izin ditolak, perangkat mobile memakai input `capture="environment"`;
+  desktop menampilkan pesan untuk memakai tombol Upload. `getUserMedia` butuh HTTPS atau localhost.
+- File dikirim ke `POST /api/admin/menus/upload` sebagai multipart, lalu `image_url` hasilnya
+  (`uploads/<file>`) disimpan lewat create/update menu. `menuImage()` mengarahkan URL tersebut
+  ke `<API_BASE>/uploads/<file>`; gambar bawaan tetap dilayani dari `assets/`.
 - Pembayaran: `POST /api/orders` → cek `/api/payments/config` → muat Snap → `snap.pay()`.
   Tanpa konfigurasi Midtrans, order dianggap menunggu konfirmasi manual.
 

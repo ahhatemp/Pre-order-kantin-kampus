@@ -42,7 +42,8 @@ function create_order_tx($userId, array $items, $pickupAt, $catatan = null) {
             $deduct->execute([$quantity, $menuId]);
         }
 
-        $orderCode = 'ORD-' . substr((string)time(), -6) . '-' . random_int(100, 999);
+        // ponytail: 32 bit acak cukup untuk skala kantin; ganti ke retry bila order > jutaan.
+        $orderCode = 'ORD-' . strtoupper(bin2hex(random_bytes(4)));
 
         $insertOrder = $pdo->prepare(
             "INSERT INTO orders (order_code, user_id, total_price, pickup_at, catatan, status, expires_at)

@@ -32,12 +32,37 @@ function orders_create() {
     $pickupTs = is_string($pickupAt) ? strtotime($pickupAt) : false;
     if ($pickupTs === false) json_error('Format waktu pengambilan tidak valid');
 
+    // Waktu ambil harus masuk akal: tidak di masa lalu, maksimal 7 hari, dan dalam jam buka.
+    if ($pickupTs < time() + 5 * 60) json_error('Waktu pengambilan sudah lewat');
+    if ($pickupTs > time() + 7 * 86400) json_error('Waktu pengambilan maksimal 7 hari ke depan');
+    $pickupTime = date('H:i', $pickupTs);
+    if ($pickupTime < '07:00' || $pickupTime > '17:00') {
+        json_error('Jam pengambilan di luar jam operasional (07:00-17:00)');
+    }
+
     if ($catatan !== null && !is_string($catatan)) json_error('Catatan harus berupa teks');
     if (is_string($catatan) && strlen($catatan) > 255) json_error('Catatan maksimal 255 karakter');
 
     try {
+        $pdo = get_db_connection();
+        $pending = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE user_id = ? AND status = 'pending' AND expires_at > NOW()");
+        $pending->execute([$me['id']]);
+
+        $config = require __DIR__ . '/../config.php';
+        if ((int)$pending->fetchColumn() >= $config['order_pending_limit']) {
+            json_error('Masih ada pesanan menunggu pembayaran. Selesaikan atau tunggu 10 menit.', 409);
+        }
+    } catch (PDOException $e) {
+        error_log('Pending order check error: ' . $e->getMessage());
+        json_error('Gagal membuat pesanan', 500);
+    }
+
+    try {
         $order = create_order_tx($me['id'], $items, date('Y-m-d H:i:s', $pickupTs), $catatan);
         json_response($order, 201);
+    } catch (PDOException $e) {
+        error_log('Create order database error: ' . $e->getMessage());
+        json_error('Gagal membuat pesanan', 500);
     } catch (Exception $e) {
         error_log('Create order error: ' . $e->getMessage());
         json_error($e->getMessage() ?: 'Gagal membuat pesanan', 400);

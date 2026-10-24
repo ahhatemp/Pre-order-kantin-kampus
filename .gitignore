@@ -3,6 +3,7 @@ backend/.env
 
 # runtime artifacts
 backend/storage/ratelimit/*.json
+backend/storage/uploads/
 backend/storage/logs/
 *.log
 

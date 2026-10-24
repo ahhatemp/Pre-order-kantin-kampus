@@ -3,6 +3,25 @@ require_once __DIR__ . '/../helpers.php';
 require_once __DIR__ . '/../auth.php';
 require_once __DIR__ . '/../db.php';
 
+function admin_menus_all() {
+    $me = authenticate();
+    require_role($me, 'admin');
+
+    try {
+        $pdo = get_db_connection();
+        $menus = $pdo->query('SELECT * FROM menus ORDER BY nama ASC')->fetchAll();
+        foreach ($menus as &$m) {
+            $m['id'] = (int)$m['id'];
+            $m['harga'] = (int)$m['harga'];
+            $m['stok'] = (int)$m['stok'];
+            $m['is_active'] = (int)$m['is_active'];
+        }
+        json_response($menus);
+    } catch (PDOException $e) {
+        json_error('Gagal mengambil daftar menu', 500);
+    }
+}
+
 function admin_menu_create() {
     $me = authenticate();
     require_role($me, 'admin');
@@ -59,13 +78,39 @@ function admin_menu_update($id) {
     require_role($me, 'admin');
 
     $body = get_json_body();
+
+    // Validasi per field supaya harga/is_active tidak bisa jadi nilai rusak.
+    foreach (['nama', 'deskripsi', 'kategori', 'harga', 'image_url', 'is_active'] as $key) {
+        if (!array_key_exists($key, $body)) continue;
+        $value = $body[$key];
+
+        if ($key === 'nama') {
+            if (!is_string($value) || trim($value) === '') json_error('Nama menu wajib diisi');
+            if (strlen($value) > 100) json_error('Nama menu maksimal 100 karakter');
+        } elseif ($key === 'deskripsi') {
+            if ($value !== null && !is_string($value)) json_error('Deskripsi harus berupa teks');
+        } elseif ($key === 'kategori') {
+            if ($value !== null && (!is_string($value) || strlen($value) > 50)) json_error('Kategori maksimal 50 karakter');
+        } elseif ($key === 'harga') {
+            if (!is_int($value) && !is_float($value)) json_error('Harga harus berupa angka');
+            if ($value <= 0) json_error('Harga harus lebih dari 0');
+            if ($value > 1000000000) json_error('Harga terlalu besar');
+        } elseif ($key === 'image_url') {
+            if ($value !== null && (!is_string($value) || strlen($value) > 255)) json_error('URL gambar maksimal 255 karakter');
+        } elseif ($key === 'is_active') {
+            if (!is_bool($value) && $value !== 0 && $value !== 1) json_error('is_active harus boolean');
+        }
+    }
+
     $fields = [];
     $params = [];
-
-    foreach (['nama', 'deskripsi', 'kategori', 'harga'] as $key) {
+    foreach (['nama', 'deskripsi', 'kategori', 'harga', 'image_url', 'is_active'] as $key) {
         if (array_key_exists($key, $body)) {
             $fields[] = "{$key} = ?";
-            $params[] = $body[$key];
+            $value = $body[$key];
+            if ($key === 'is_active') $value = (int)(bool)$value;
+            if ($key === 'harga') $value = (int)$value;
+            $params[] = $value;
         }
     }
 
@@ -74,11 +119,16 @@ function admin_menu_update($id) {
 
     try {
         $pdo = get_db_connection();
+        $exists = $pdo->prepare('SELECT id FROM menus WHERE id = ?');
+        $exists->execute([$id]);
+        if (!$exists->fetch()) json_error('Menu tidak ditemukan', 404);
+
         $sql = 'UPDATE menus SET ' . implode(', ', $fields) . ' WHERE id = ?';
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         json_response(['message' => 'Menu berhasil diperbarui']);
     } catch (PDOException $e) {
+        error_log('Update menu error: ' . $e->getMessage());
         json_error('Gagal memperbarui menu', 500);
     }
 }
@@ -95,6 +145,10 @@ function admin_menu_stock($id) {
 
     try {
         $pdo = get_db_connection();
+        $exists = $pdo->prepare('SELECT id FROM menus WHERE id = ?');
+        $exists->execute([$id]);
+        if (!$exists->fetch()) json_error('Menu tidak ditemukan', 404);
+
         $stmt = $pdo->prepare('UPDATE menus SET stok = ? WHERE id = ?');
         $stmt->execute([(int)$stok, $id]);
         json_response(['message' => 'Stok berhasil diperbarui']);

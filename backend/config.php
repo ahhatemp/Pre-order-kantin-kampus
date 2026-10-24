@@ -33,6 +33,8 @@ return [
     'db_name' => getenv('DB_NAME') ?: 'kantin',
     'jwt_secret' => getenv('JWT_SECRET') ?: 'default_jwt_secret',
     'midtrans_server_key' => getenv('MIDTRANS_SERVER_KEY') ?: '',
+    'midtrans_client_key' => getenv('MIDTRANS_CLIENT_KEY') ?: '',
     'midtrans_is_production' => getenv('MIDTRANS_IS_PRODUCTION') === 'true',
     'rate_limit_order' => (int)(getenv('RATE_LIMIT_ORDER_MAX') ?: 20),
+    'order_pending_limit' => (int)(getenv('ORDER_PENDING_MAX') ?: 3),
 ];
