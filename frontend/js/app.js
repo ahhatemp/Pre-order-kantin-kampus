@@ -2199,18 +2199,12 @@ function mountShell() {
 }
 
 /* ---------- Events ---------- */
-/* Rantai gambar: assets lokal -> folder referensi desain -> placeholder SVG.
-   ponytail: buang rantai folder referensi begitu frontend/assets/ terisi. */
+/* Rantai gambar: assets lokal -> placeholder SVG. */
 document.addEventListener('error', e => {
   const el = e.target;
   if (!el || el.tagName !== 'IMG' || el.dataset.fallback === 'final') return;
-  if (el.dataset.fallback !== 'self') {
-    el.dataset.fallback = 'self';
-    el.src = '../Desain-Berdasarkan-PRD-dan-DESIGN/' + el.getAttribute('src');
-  } else {
-    el.dataset.fallback = 'final';
-    el.src = IMG_FALLBACK;
-  }
+  el.dataset.fallback = 'final';
+  el.src = IMG_FALLBACK;
 }, true);
 
 document.addEventListener('click', e => {

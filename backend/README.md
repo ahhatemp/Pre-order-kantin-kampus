@@ -78,7 +78,6 @@ Header auth: `Authorization: Bearer <token>`
 
 `frontend/` (HTML/CSS/JS polos, satu file per layar) terhubung ke API ini lewat
 `API_BASE` di `frontend/js/api.js` (default `http://localhost:5000/api`).
-Versi desain mentah tetap di `Desain-Berdasarkan-PRD-dan-DESIGN/` sebagai referensi.
 
 Cara jalan:
 

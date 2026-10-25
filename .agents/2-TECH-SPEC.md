@@ -78,7 +78,6 @@ frontend/
 └── assets/                  gambar menu bawaan
 
 .agents/                     PRD, tech spec, tasks, design
-Desain-Berdasarkan-PRD-dan-DESIGN/   desain mentah (referensi)
 ```
 
 ## 4. Database
