@@ -59,8 +59,10 @@ Stack aktual: PHP native + PDO/MySQL, frontend HTML/CSS/JS tanpa build step, Mid
 - **Bukti:** `backend/controllers/admin_menus.php`, `backend/controllers/uploads.php`.
 - **Fitur:** `POST /api/admin/menus`, `GET /api/admin/menus`, `GET /api/admin/menus/{id}`,
   `PATCH /api/admin/menus/{id}` (termasuk `is_active`), `PATCH /api/admin/menus/{id}/stock`,
-  `POST /api/admin/menus/upload` (multipart JPG/PNG/WebP ≤ 5 MB), `GET /api/uploads/{file}`.
-- **Catatan:** "hapus" dilakukan dengan menonaktifkan menu (`is_active = 0`), bukan hard delete.
+  `DELETE /api/admin/menus/{id}`, `POST /api/admin/menus/upload`
+  (multipart JPG/PNG/WebP ≤ 5 MB), `GET /api/uploads/{file}`.
+- **Catatan:** hapus menu bersifat lunak (`deleted_at`), sehingga riwayat order lama tetap
+  menampilkan nama menu. Menu nonaktif (`is_active = 0`) tetap muncul di halaman admin.
   Foto upload disimpan acak di `backend/storage/uploads/` dan disajikan lewat API.
 
 ---
@@ -84,7 +86,7 @@ Stack aktual: PHP native + PDO/MySQL, frontend HTML/CSS/JS tanpa build step, Mid
   `backend/api/index.php`, `frontend/js/app.js`.
 - **Fitur:** Snap Token saat order dibuat, `GET /api/payments/config`, webhook dengan validasi
   signature SHA-512 dan `gross_amount`, penanganan pembayaran terlambat untuk order `cancelled`.
-- **Mode demo:** tanpa server key, backend memakai token dummy dan frontend melewati Snap.
+- **Mode demo:** tanpa server key, backend memakai token dummy, order langsung `paid`, dan frontend melewati Snap.
 
 ### T-12: API riwayat & detail order — Selesai
 - **Bukti:** `backend/controllers/orders.php`.
@@ -101,7 +103,8 @@ Stack aktual: PHP native + PDO/MySQL, frontend HTML/CSS/JS tanpa build step, Mid
 
 ### T-14: API update status order — Selesai
 - **Bukti:** `backend/controllers/admin_orders.php`.
-- **Transisi sah:** `pending → paid|cancelled`, `paid → ready|cancelled`, `ready → completed`.
+- **Transisi sah:** `pending → cancelled`, `paid → ready|cancelled`, `ready → completed`.
+  `pending → paid` hanya otomatis: webhook Midtrans atau checkout demo tanpa Midtrans.
 - **Stok:** dikembalikan saat order dibatalkan.
 
 ### T-15: Auto-cancel order kedaluwarsa — Selesai

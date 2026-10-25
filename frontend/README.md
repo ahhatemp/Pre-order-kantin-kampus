@@ -20,6 +20,7 @@ frontend/
 ├── profil-kantin.html, jam-operasional.html      (khusus admin)
 ├── admin-pesanan.html    papan pesanan masuk per slot jam
 ├── admin-stok.html       kelola stok menu
+├── favicon.svg, favicon.ico, apple-touch-icon.png  ikon tab & layar utama
 ├── assets/           gambar menu
 ├── css/styles.css    design tokens + layout
 └── js/

@@ -18,7 +18,7 @@ function create_order_tx($userId, array $items, $pickupAt, $catatan = null) {
     try {
         $menuIds = array_keys($merged);
         $placeholders = implode(',', array_fill(0, count($menuIds), '?'));
-        $stmt = $pdo->prepare("SELECT id, nama, harga, stok, is_active FROM menus WHERE id IN ($placeholders) FOR UPDATE");
+        $stmt = $pdo->prepare("SELECT id, nama, harga, stok, is_active FROM menus WHERE id IN ($placeholders) AND deleted_at IS NULL FOR UPDATE");
         $stmt->execute($menuIds);
 
         $menuMap = [];
@@ -58,8 +58,11 @@ function create_order_tx($userId, array $items, $pickupAt, $catatan = null) {
         }
 
         $snapToken = create_snap_token($orderCode, $totalPrice);
-        $updateToken = $pdo->prepare('UPDATE orders SET payment_token = ? WHERE id = ?');
-        $updateToken->execute([$snapToken, $orderId]);
+        // Mode demo tanpa Midtrans: pembayaran dianggap berhasil otomatis,
+        // jadi admin tidak perlu mengonfirmasi pending -> paid secara manual.
+        $isDemo = is_string($snapToken) && strpos($snapToken, 'dummy-') === 0;
+        $updateToken = $pdo->prepare('UPDATE orders SET payment_token = ?, status = ? WHERE id = ?');
+        $updateToken->execute([$snapToken, $isDemo ? 'paid' : 'pending', $orderId]);
 
         $pdo->commit();
 
@@ -72,6 +75,7 @@ function create_order_tx($userId, array $items, $pickupAt, $catatan = null) {
             'order_code' => $orderCode,
             'total_price' => $totalPrice,
             'payment_token' => $snapToken,
+            'status' => $isDemo ? 'paid' : 'pending',
             'expires_at' => $expiresAt,
         ];
     } catch (Throwable $e) {

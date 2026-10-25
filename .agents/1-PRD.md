@@ -146,7 +146,7 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 - **Input:** Order ID, metode pembayaran dipilih di halaman Snap Midtrans (e-wallet/QRIS/transfer bank)
 - **Proses:** Generate Snap Token saat order dibuat; Midtrans mengirim webhook untuk update status
 - **Output:** Payment confirmed, order status = "paid"
-- **Aturan:** Payment timeout 10 menit, order auto-cancel jika tidak bayar. Bila Midtrans belum dikonfigurasi, order tetap dibuat dengan token dummy dan menunggu konfirmasi manual (mode demo)
+- **Aturan:** Payment timeout 10 menit, order auto-cancel jika tidak bayar. Bila Midtrans belum dikonfigurasi, order otomatis dianggap sudah dibayar saat checkout (mode demo) tanpa konfirmasi manual admin.
 
 **FR-12: Invoice / Rincian Pesanan**
 - **Input:** Order ID

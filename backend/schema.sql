@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS menus (
   stok INT NOT NULL DEFAULT 0,
   image_url VARCHAR(255) NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
+  deleted_at DATETIME NULL DEFAULT NULL,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -65,12 +66,57 @@ CREATE TABLE IF NOT EXISTS order_items (
   INDEX idx_order_id (order_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ---------- push_subscriptions ----------
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  endpoint TEXT NOT NULL,
+  endpoint_hash CHAR(64) NOT NULL,
+  p256dh VARCHAR(255) NOT NULL DEFAULT '',
+  auth VARCHAR(255) NOT NULL DEFAULT '',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_endpoint_hash (endpoint_hash),
+  INDEX idx_push_user (user_id),
+  CONSTRAINT fk_push_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------- kantin_profile ----------
+CREATE TABLE IF NOT EXISTS kantin_profile (
+  id TINYINT NOT NULL PRIMARY KEY,
+  nama VARCHAR(100) NOT NULL,
+  lokasi VARCHAR(150) NOT NULL DEFAULT '',
+  kontak VARCHAR(30) NOT NULL DEFAULT '',
+  deskripsi VARCHAR(255) NOT NULL DEFAULT '',
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------- kantin_hours ----------
+CREATE TABLE IF NOT EXISTS kantin_hours (
+  day_of_week TINYINT NOT NULL PRIMARY KEY,
+  is_open TINYINT(1) NOT NULL DEFAULT 1,
+  open_time TIME NOT NULL DEFAULT '07:00:00',
+  close_time TIME NOT NULL DEFAULT '16:00:00',
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ---------- data awal ----------
 -- Password semua akun awal: password123
 INSERT INTO users (nim, nama, email, password, role)
 VALUES
 ('11111111', 'Admin Kantin', 'admin@kantin.com', '$2y$10$6H5YKVI8OGctcwyH8Uv5BeC/BtYVSTBkH6vVSWNlaOSU/sbZQIwfq', 'admin'),
 ('22222222', 'Mahasiswa Test', 'user@kantin.com', '$2y$10$6H5YKVI8OGctcwyH8Uv5BeC/BtYVSTBkH6vVSWNlaOSU/sbZQIwfq', 'mahasiswa');
+
+INSERT IGNORE INTO kantin_profile (id, nama, lokasi, kontak, deskripsi)
+VALUES (1, 'Kantin Kampus', 'Gedung A, Lantai 1', '0812-3456-7890', 'Masakan rumahan segar setiap hari.');
+
+INSERT IGNORE INTO kantin_hours (day_of_week, is_open, open_time, close_time) VALUES
+(1, 1, '07:00:00', '16:00:00'),
+(2, 1, '07:00:00', '16:00:00'),
+(3, 1, '07:00:00', '16:00:00'),
+(4, 1, '07:00:00', '16:00:00'),
+(5, 1, '07:00:00', '15:00:00'),
+(6, 0, '08:00:00', '13:00:00'),
+(7, 0, '07:00:00', '16:00:00');
 
 INSERT INTO menus (nama, kategori, harga, stok, deskripsi, image_url, is_active)
 VALUES

@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../helpers.php';
 require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../services/push.php';
 
 function payments_config() {
     $config = require __DIR__ . '/../config.php';
@@ -47,6 +48,7 @@ function payments_webhook() {
     }
 
     $pdo = get_db_connection();
+    $paidOrder = null;
 
     if (in_array($transactionStatus, ['capture', 'settlement'], true)) {
         try {
@@ -68,6 +70,7 @@ function payments_webhook() {
 
             if ($order['status'] === 'pending') {
                 $pdo->prepare("UPDATE orders SET status = 'paid' WHERE id = ?")->execute([$order['id']]);
+                $paidOrder = $order;
             } elseif ($order['status'] === 'cancelled') {
                 /* Sweep sudah membatalkan + mengembalikan stok, tapi pembayaran
                    tetap masuk. Pesan ulang stok kalau masih ada; kalau tidak,
@@ -92,6 +95,7 @@ function payments_webhook() {
                     $deduct->execute([(int)$item['quantity'], (int)$item['menu_id']]);
                 }
                 $pdo->prepare("UPDATE orders SET status = 'paid' WHERE id = ?")->execute([$order['id']]);
+                $paidOrder = $order;
                 error_log("Late payment {$orderCode}: pesanan diaktifkan kembali");
             }
 
@@ -129,6 +133,11 @@ function payments_webhook() {
             error_log('Webhook cancel error: ' . $e->getMessage());
             json_error('Gagal memproses webhook', 500);
         }
+    }
+
+    // Kirim setelah respons supaya webhook Midtrans tidak menunggu layanan push.
+    if ($paidOrder !== null) {
+        register_shutdown_function(fn() => push_notify_new_order($paidOrder));
     }
 
     json_response(['status' => 'ok']);

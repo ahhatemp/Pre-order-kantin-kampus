@@ -5,6 +5,7 @@ backend/.env
 backend/storage/ratelimit/*.json
 backend/storage/uploads/
 backend/storage/logs/
+backend/storage/vapid.json
 *.log
 
 # OS junk

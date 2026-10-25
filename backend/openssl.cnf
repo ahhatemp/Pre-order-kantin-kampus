@@ -1,0 +1,19 @@
+# Fallback untuk instalasi PHP Windows yang tidak menemukan openssl.cnf sistem.
+# Dipakai hanya saat pembuatan kunci VAPID tanpa config berhasil.
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+
+[provider_sect]
+default = default_sect
+
+[default_sect]
+activate = 1
+
+[req]
+default_bits = 2048
+distinguished_name = dn
+default_md = sha256
+
+[dn]

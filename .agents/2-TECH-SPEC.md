@@ -111,6 +111,7 @@ Semua harga disimpan sebagai `INT` Rupiah penuh. Waktu memakai `DATETIME`; PHP d
 | `stok` | INT | NOT NULL DEFAULT 0 |
 | `image_url` | VARCHAR(255) | NULL |
 | `is_active` | TINYINT(1) | NOT NULL DEFAULT 1 |
+| `deleted_at` | DATETIME | NULL (soft delete; riwayat order tetap valid) |
 | `updated_at` | DATETIME | DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP |
 
 ### `orders`
@@ -172,6 +173,7 @@ Index: `idx_order_id`.
 | GET | `/api/admin/menus/{id}` | admin | Detail menu |
 | PATCH | `/api/admin/menus/{id}` | admin | Ubah field menu |
 | PATCH | `/api/admin/menus/{id}/stock` | admin | Ubah stok |
+| DELETE | `/api/admin/menus/{id}` | admin | Hapus menu (soft delete, `deleted_at`) |
 | POST | `/api/admin/menus/upload` | admin | Upload foto menu (multipart `image`, JPG/PNG/WebP ≤ 5 MB) |
 | GET | `/api/uploads/{file}` | — | Serve foto menu hasil upload |
 | GET | `/api/admin/orders` | admin | Daftar pesanan (`?pickup_date=YYYY-MM-DD`) |
@@ -253,7 +255,7 @@ limiter membiarkan request lewat (fail-open). Login tidak dibatasi percobaannya.
 ```
 BEGIN;
   SELECT id, nama, harga, stok, is_active FROM menus
-    WHERE id IN (?, ...) FOR UPDATE;
+    WHERE id IN (?, ...) AND deleted_at IS NULL FOR UPDATE;
   -- gabungkan quantity untuk menu_id yang sama
   -- tolak jika menu tidak ada / is_active = 0 / stok < quantity
   UPDATE menus SET stok = stok - ? WHERE id = ?;
@@ -270,7 +272,7 @@ terpotong. Respons gagal stok: HTTP 400 dengan pesan spesifik dari service.
 
 | Dari | Ke | Pemicu |
 |---|---|---|
-| `pending` | `paid` | Webhook Midtrans (`capture`/`settlement` valid) |
+| `pending` | `paid` | Otomatis: webhook Midtrans (`capture`/`settlement` valid) atau checkout demo saat Midtrans belum dikonfigurasi |
 | `pending` | `cancelled` | Admin, sweep kedaluwarsa, webhook `cancel`/`expire`/`deny` |
 | `paid` | `ready` | Admin |
 | `paid` | `cancelled` | Admin (stok dikembalikan) |
@@ -286,8 +288,8 @@ Transisi lain ditolak. Stok dikembalikan hanya saat order berubah menjadi `cance
    Server key tidak pernah dikirim ke client.
 3. Frontend memuat `snap.js` dan memanggil `window.snap.pay(payment_token)`.
 4. Jika Midtrans belum dikonfigurasi (server key kosong/placeholder), backend membuat token
-   dummy `dummy-snap-token-*`; frontend melewati Snap dan menampilkan pesan bahwa pesanan
-   menunggu konfirmasi manual. Ini menjaga demo tetap berjalan tanpa kredensial.
+   dummy `dummy-snap-token-*` dan langsung menandai order `paid` (mode demo); frontend melewati
+   Snap dan menampilkan "Pembayaran berhasil". Admin tidak lagi mengonfirmasi pembayaran manual.
 
 ### Webhook `POST /api/payments/webhook`
 

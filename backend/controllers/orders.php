@@ -4,6 +4,8 @@ require_once __DIR__ . '/../auth.php';
 require_once __DIR__ . '/../db.php';
 require_once __DIR__ . '/../rate_limit.php';
 require_once __DIR__ . '/../services/order.php';
+require_once __DIR__ . '/../services/push.php';
+require_once __DIR__ . '/../services/kantin_hours.php';
 
 function orders_create() {
     $me = authenticate();
@@ -36,8 +38,20 @@ function orders_create() {
     if ($pickupTs < time() + 5 * 60) json_error('Waktu pengambilan sudah lewat');
     if ($pickupTs > time() + 7 * 86400) json_error('Waktu pengambilan maksimal 7 hari ke depan');
     $pickupTime = date('H:i', $pickupTs);
-    if ($pickupTime < '07:00' || $pickupTime > '17:00') {
-        json_error('Jam pengambilan di luar jam operasional (07:00-17:00)');
+    $dayOfWeek = (int)date('N', $pickupTs);
+    try {
+        $hours = kantin_hours_for_day(get_db_connection(), $dayOfWeek);
+    } catch (PDOException $e) {
+        error_log('Opening hours check error: ' . $e->getMessage());
+        json_error('Gagal memeriksa jam operasional', 500);
+    }
+    if ($hours === null) json_error('Jam operasional kantin belum diatur', 409);
+    if (!$hours['is_open']) {
+        $dayNames = kantin_day_names();
+        json_error('Kantin tutup pada hari ' . ($dayNames[$dayOfWeek] ?? 'itu'));
+    }
+    if ($pickupTime < $hours['open_time'] || $pickupTime > $hours['close_time']) {
+        json_error('Jam pengambilan di luar jam operasional (' . $hours['open_time'] . '-' . $hours['close_time'] . ')');
     }
 
     if ($catatan !== null && !is_string($catatan)) json_error('Catatan harus berupa teks');
@@ -59,6 +73,12 @@ function orders_create() {
 
     try {
         $order = create_order_tx($me['id'], $items, date('Y-m-d H:i:s', $pickupTs), $catatan);
+
+        // Mode demo menandai order langsung paid; beri tahu admin setelah respons terkirim.
+        if (($order['status'] ?? '') === 'paid') {
+            register_shutdown_function(fn() => push_notify_new_order($order));
+        }
+
         json_response($order, 201);
     } catch (PDOException $e) {
         error_log('Create order database error: ' . $e->getMessage());

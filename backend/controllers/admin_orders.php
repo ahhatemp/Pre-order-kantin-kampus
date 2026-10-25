@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../helpers.php';
 require_once __DIR__ . '/../auth.php';
 require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../services/push.php';
 
 function admin_orders_all() {
     $me = authenticate();
@@ -67,9 +68,10 @@ function admin_order_status($id) {
     $status = $body['status'] ?? null;
 
     if (!is_string($status)) json_error('Status wajib diisi');
+    if ($status === 'paid') json_error('Status pembayaran diperbarui otomatis oleh sistem');
 
     $validTransitions = [
-        'pending' => ['paid', 'cancelled'],
+        'pending' => ['cancelled'],
         'paid' => ['ready', 'cancelled'],
         'ready' => ['completed'],
     ];
@@ -114,6 +116,20 @@ function admin_order_status($id) {
         $update->execute([$status, $id]);
 
         $pdo->commit();
+
+        // Kirim setelah respons supaya admin tidak menunggu layanan push.
+        if ($status === 'ready') {
+            $userId = (int)$order['user_id'];
+            register_shutdown_function(function () use ($userId) {
+                push_send_to_user($userId, [
+                    'title' => 'Kantin Kampus',
+                    'body' => 'Pesananmu telah siap',
+                    'url' => 'pesanan.html',
+                    'tag' => 'pesanan-siap',
+                ]);
+            });
+        }
+
         json_response(['message' => 'Status pesanan berhasil diperbarui']);
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();

@@ -68,7 +68,9 @@ const ICONS = {
   bookmark: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/>',
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
   arrowRight: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
-  key: '<path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/>'
+  key: '<path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
+  eye: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><path d="m2 2 20 20"/>'
 };
 
 function icon(name, size) {
@@ -100,7 +102,10 @@ function categories() {
   return ['Semua'].concat(set);
 }
 
+const DAY_NAMES = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
 const SLOT_TIMES = ['12:00', '13:00', '14:00', '15:00', '16:00'];
+const SLOT_START = '12:00';
+const MIN_PICKUP_LEAD = 5; // menit; samakan dengan backend/controllers/orders.php
 
 function clockNow(d) {
   d = d || new Date();
@@ -111,22 +116,96 @@ function slotMinutes(t) {
   return Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
 }
 
-/* Slot hari ini; kalau semua sudah lewat, tampilkan slot besok. */
+function clockSeconds(d) {
+  return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+}
+
+function fmtDuration(mins) {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h === 0) return m + ' menit';
+  if (m === 0) return h + ' jam';
+  return h + ' jam ' + m + ' menit';
+}
+
+/* ---------- Jam operasional + slot pickup ---------- */
+function dayOfWeek(d) {
+  const js = d.getDay(); // 0 = Minggu
+  return js === 0 ? 7 : js;
+}
+
+function hoursFor(dow) {
+  return (state.hours || []).find(h => h.day === dow) || null;
+}
+
+function slotRange(h) {
+  const start = Math.max(slotMinutes(SLOT_START), slotMinutes(h.openAt));
+  const end = slotMinutes(h.closeAt);
+  const out = [];
+  for (let m = start; m <= end; m += 60) {
+    out.push(String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'));
+  }
+  return out;
+}
+
+/* Hari buka pertama yang masih punya slot; null bila semua hari tutup. */
+function pickupPlan(now) {
+  now = now || new Date();
+  const leadSec = MIN_PICKUP_LEAD * 60;
+  for (let offset = 0; offset < 7; offset++) {
+    const d = new Date(now.getTime());
+    d.setDate(d.getDate() + offset);
+    const h = hoursFor(dayOfWeek(d));
+    if (state.hours && (!h || !h.open)) continue;
+    const times = h ? slotRange(h) : SLOT_TIMES;
+    if (offset === 0) {
+      const left = times.filter(t => slotMinutes(t) * 60 - clockSeconds(now) >= leadSec);
+      if (!left.length) continue;
+      return { date: dateOnly(d), offset: 0, times: left };
+    }
+    return { date: dateOnly(d), offset: offset, times: times };
+  }
+  return null;
+}
+
 function pickupSlots(now) {
   now = now || new Date();
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-  const tomorrow = SLOT_TIMES.every(t => slotMinutes(t) <= nowMin);
-  return SLOT_TIMES.map(t => {
-    if (tomorrow) return { t: t, wait: 'Besok', disabled: false };
-    const diff = slotMinutes(t) - nowMin;
-    return { t: t, wait: diff <= 0 ? 'Sudah lewat' : '±' + diff + ' menit', disabled: diff <= 0 };
-  });
+  const plan = pickupPlan(now);
+  if (!plan) return [];
+  if (plan.offset === 0) {
+    return plan.times.map(t => {
+      const diff = slotMinutes(t) * 60 - clockSeconds(now);
+      return { t: t, wait: '±' + fmtDuration(Math.ceil(diff / 60)), dayLabel: '', disabled: false };
+    });
+  }
+  const d = new Date(now.getTime());
+  d.setDate(d.getDate() + plan.offset);
+  const label = plan.offset === 1 ? 'Besok' : DAY_NAMES[dayOfWeek(d) - 1];
+  return plan.times.map(t => ({ t: t, wait: label, dayLabel: label.toLowerCase(), disabled: false }));
 }
 
 function nextPickupHint() {
   const next = pickupSlots().find(s => !s.disabled);
   if (!next) return '-';
-  return next.wait === 'Besok' ? next.t + ' besok' : next.t;
+  return next.t + (next.dayLabel ? ' ' + next.dayLabel : '');
+}
+
+function hoursMeta(now) {
+  now = now || new Date();
+  if (!state.hours) return 'Kantin buka 07:00–16:00';
+  const next = nextPickupHint();
+  const tail = next === '-' ? 'Pickup belum tersedia' : 'Pickup mulai ' + next;
+  const h = hoursFor(dayOfWeek(now));
+  if (!h || !h.open) return 'Kantin tutup hari ini · ' + tail;
+  return 'Kantin buka ' + h.openAt + '–' + h.closeAt + ' · ' + tail;
+}
+
+function todayHoursLabel(now) {
+  now = now || new Date();
+  if (!state.hours) return '-';
+  const h = hoursFor(dayOfWeek(now));
+  if (!h || !h.open) return 'Tutup hari ini';
+  return 'Buka hari ini ' + h.openAt + '–' + h.closeAt;
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
@@ -157,11 +236,8 @@ function pickupLabel(o) {
 }
 
 function plannedPickup() {
-  const now = new Date();
-  if (state.pickup && slotMinutes(state.pickup) <= now.getHours() * 60 + now.getMinutes()) {
-    now.setDate(now.getDate() + 1);
-  }
-  return { date: dateOnly(now), time: state.pickup || '' };
+  const plan = pickupPlan();
+  return { date: plan ? plan.date : dateOnly(new Date()), time: state.pickup || '' };
 }
 
 /* ---------- Store (persisted per-tab) ---------- */
@@ -177,6 +253,8 @@ function defaultState() {
     loading: false,
     user: null,
     menu: [],
+    profile: null,
+    hours: null,
     cart: {},
     pickup: null,
     note: null,
@@ -187,7 +265,8 @@ function defaultState() {
     category: 'Semua',
     search: '',
     flash: null,
-    menuForm: null
+    menuForm: null,
+    menuDeleteId: null
   };
 }
 
@@ -196,6 +275,7 @@ function persist() {
   const snap = Object.assign({}, state);
   delete snap.loading;
   delete snap.menuForm;
+  delete snap.menuDeleteId;
   try { sessionStorage.setItem(STORE_KEY, JSON.stringify(snap)); } catch (e) { /* ignore */ }
 }
 
@@ -245,6 +325,133 @@ function showFlash() {
   persist();
 }
 
+/* ---------- Web Push ---------- */
+const PUSH_SUPPORTED = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+let pushState = PUSH_SUPPORTED ? 'default' : 'unsupported';
+let pushBusy = false;
+let swRegistration = null;
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+
+async function registerServiceWorker() {
+  if (swRegistration) return swRegistration;
+  swRegistration = await navigator.serviceWorker.register('sw.js');
+  return swRegistration;
+}
+
+async function syncPushSubscription() {
+  if (!PUSH_SUPPORTED) { pushState = 'unsupported'; return; }
+  if (!state.role || !state.user) return;
+
+  try {
+    const registration = await registerServiceWorker();
+    const subscription = await registration.pushManager.getSubscription();
+    if (Notification.permission === 'denied') {
+      pushState = 'denied';
+    } else if (subscription && Notification.permission === 'granted') {
+      await api('/push/subscribe', { method: 'POST', body: subscription.toJSON() });
+      pushState = 'subscribed';
+    } else {
+      pushState = 'default';
+    }
+  } catch (e) {
+    pushState = 'error';
+  }
+  if (PAGE === 'notifikasi') renderView();
+}
+
+async function enablePush() {
+  if (!PUSH_SUPPORTED) { toast('Browser ini tidak mendukung notifikasi push.', 'info'); return; }
+  if (pushBusy) return;
+  pushBusy = true;
+
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      pushState = permission === 'denied' ? 'denied' : 'default';
+      renderView();
+      toast(permission === 'denied' ? 'Izin notifikasi diblokir di browser.' : 'Izin notifikasi belum diberikan.', 'info');
+      return;
+    }
+
+    const registration = await registerServiceWorker();
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      const config = await api('/push/public-key');
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(config.publicKey)
+      });
+    }
+
+    await api('/push/subscribe', { method: 'POST', body: subscription.toJSON() });
+    pushState = 'subscribed';
+    renderView();
+    toast('Notifikasi push aktif.', 'checkCircle');
+  } catch (e) {
+    pushState = 'error';
+    renderView();
+    toast(e.message || 'Gagal mengaktifkan notifikasi push.', 'alert');
+  } finally {
+    pushBusy = false;
+  }
+}
+
+async function disablePush() {
+  if (!PUSH_SUPPORTED || pushBusy) return;
+  pushBusy = true;
+
+  try {
+    const registration = await registerServiceWorker();
+    const subscription = await registration.pushManager.getSubscription();
+    if (subscription) {
+      try {
+        await api('/push/unsubscribe', { method: 'POST', body: { endpoint: subscription.endpoint } });
+      } catch (e) { /* tetap lepaskan dari perangkat */ }
+      await subscription.unsubscribe();
+    }
+    pushState = 'default';
+    renderView();
+    toast('Notifikasi push dimatikan.', 'info');
+  } catch (e) {
+    toast('Gagal mematikan notifikasi push.', 'alert');
+  } finally {
+    pushBusy = false;
+  }
+}
+
+/* Lepas subscription perangkat ini dari akun yang logout. */
+async function detachPush() {
+  if (!PUSH_SUPPORTED) return;
+  try {
+    const registration = await registerServiceWorker();
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) return;
+    try {
+      await api('/push/unsubscribe', { method: 'POST', body: { endpoint: subscription.endpoint } });
+    } catch (e) { /* tetap lepaskan dari perangkat */ }
+    await subscription.unsubscribe();
+  } catch (e) { /* abaikan */ }
+}
+
+async function doLogout() {
+  /* Lepas subscription perangkat ini dulu agar tidak terus menerima push akun yang keluar. */
+  await Promise.race([
+    detachPush(),
+    new Promise(resolve => setTimeout(resolve, 1500))
+  ]);
+  pushState = PUSH_SUPPORTED ? 'default' : 'unsupported';
+  auth.clear();
+  state.role = null; state.user = null; state.cart = {}; state.pickup = null;
+  state.authMode = 'login'; state.formError = null;
+  navigate('auth', { replace: true, flash: { msg: 'Kamu sudah keluar.', ic: 'logout' } });
+}
+
 /* ---------- Navigation ---------- */
 const LEAVE_MS = 160;
 const reducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -254,7 +461,7 @@ const TITLES = {
   menu: 'Menu — Kantin Kampus',
   cart: 'Keranjang — Kantin Kampus',
   payment: 'Pembayaran — Kantin Kampus',
-  success: 'Pesanan Dibuat — Kantin Kampus',
+  success: 'Pesanan — Kantin Kampus',
   orders: 'Pesanan Saya — Kantin Kampus',
   tracking: 'Lacak Pesanan — Kantin Kampus',
   accountStudent: 'Akun — Kantin Kampus',
@@ -310,6 +517,7 @@ function resetOverlays() {
   const modal = $('modal');
   if (modal) resetMenuForm(modal);
   state.menuForm = null;
+  state.menuDeleteId = null;
 }
 
 /* Navigasi antar layar tanpa memuat ulang dokumen: appbar + tabbar tetap. */
@@ -336,7 +544,9 @@ async function goToRoute(page, opts) {
 
   const needs = pageNeeds(target);
   const cached = (!needs.menu || dataLoaded.menu || state.menu.length)
-    && (!needs.orders || dataLoaded.orders || state.orders.length);
+    && (!needs.orders || dataLoaded.orders || state.orders.length)
+    && (!needs.profile || dataLoaded.profile)
+    && (!needs.hours || dataLoaded.hours);
   const before = cached ? dataSignature(target) : null;
 
   state.loading = !cached;
@@ -393,6 +603,10 @@ function tabsFor() {
   return state.role === 'admin' ? ADMIN_TABS : STUDENT_TABS;
 }
 
+function kantinName() {
+  return (state.profile && state.profile.nama) || 'Kantin Kampus';
+}
+
 function renderAppbar() {
   const bar = $('appbar');
   const r = state.route;
@@ -403,7 +617,7 @@ function renderAppbar() {
   let html = '';
 
   if (r === 'menu') {
-    html = '<div class="od-fill"><div class="appbar__sub">Kantin Kampus</div>'
+    html = '<div class="od-fill"><div class="appbar__sub">' + esc(kantinName()) + '</div>'
       + '<div class="appbar__title">Halo, ' + esc(state.user ? state.user.nama.split(' ')[0] : 'Mahasiswa') + '</div></div>'
       + '<button class="iconbtn iconbtn--end" data-action="go" data-route="cart" aria-label="Keranjang">' + icon('cart', 22) + '</button>';
   } else if (r === 'cart') {
@@ -485,9 +699,16 @@ function renderCartbar() {
 function field(id, label, type, placeholder, value, required) {
   return '<div class="field">'
     + '<label class="field__label" for="f-' + id + '">' + label + (required ? ' <span class="field__req" aria-hidden="true">*</span>' : '') + '</label>'
-    + '<input class="input" id="f-' + id + '" name="' + id + '" type="' + type + '" placeholder="' + placeholder + '"'
-    + (value ? ' value="' + esc(value) + '"' : '')
-    + (required ? ' required aria-required="true"' : '') + ' autocomplete="off" />'
+    + (type === 'password'
+      ? '<div class="pass-wrap">'
+      + '<input class="input" id="f-' + id + '" name="' + id + '" type="password" placeholder="' + placeholder + '"'
+      + (value ? ' value="' + esc(value) + '"' : '')
+      + (required ? ' required aria-required="true"' : '') + ' autocomplete="off" />'
+      + '<button type="button" class="pass-peek" data-action="toggle-pass" aria-pressed="false" aria-label="Tampilkan password">' + icon('eye', 18) + '</button>'
+      + '</div>'
+      : '<input class="input" id="f-' + id + '" name="' + id + '" type="' + type + '" placeholder="' + placeholder + '"'
+      + (value ? ' value="' + esc(value) + '"' : '')
+      + (required ? ' required aria-required="true"' : '') + ' autocomplete="off" />')
     + '</div>';
 }
 
@@ -557,7 +778,7 @@ function viewMenu() {
   const hero = '<div class="hero" style="margin-top:var(--space-3)">'
     + '<span class="hero__eyebrow">Pre-order hari ini</span>'
     + '<span class="hero__title">Ambil sesuai jadwal, tanpa antre</span>'
-    + '<div class="hero__meta">' + icon('clock', 15) + '<span>Kantin buka 07:00–17:00 · Pickup mulai ' + nextPickupHint() + '</span></div>'
+    + '<div class="hero__meta">' + icon('clock', 15) + '<span>' + esc(hoursMeta()) + '</span></div>'
     + '</div>';
 
   const cards = list.length ? '<div class="menu-grid">' + list.map(dishCard).join('') + '</div>'
@@ -619,12 +840,17 @@ function viewCart() {
       + '<span class="line__sub od-nowrap">' + fmt(i.price * qty) + '</span></div></div></div>';
   }).join('');
 
-  const pickup = '<div class="section-title">Kapan mau ambil?</div><div class="option-list" role="group" aria-label="Pilih jam ambil">'
-    + pickupSlots().map(p => '<button class="pick" data-action="select-pickup" data-time="' + p.t + '" aria-pressed="' + (state.pickup === p.t) + '"' + (p.disabled ? ' disabled' : '') + '>'
-      + '<span class="pick__ring" aria-hidden="true"></span>'
-      + '<span class="od-fill od-stack" style="--od-gap:2px"><span class="pick__time">' + p.t + '</span>'
-      + '<span class="pick__wait">' + p.wait + '</span></span></button>').join('')
-    + '</div>';
+  const slots = pickupSlots();
+  const picked = slots.some(p => p.t === state.pickup);
+  const pickup = '<div class="section-title">Kapan mau ambil?</div>'
+    + (slots.length
+      ? '<div class="option-list" role="group" aria-label="Pilih jam ambil">'
+        + slots.map(p => '<button class="pick" data-action="select-pickup" data-time="' + p.t + '" aria-pressed="' + (state.pickup === p.t) + '">'
+          + '<span class="pick__ring" aria-hidden="true"></span>'
+          + '<span class="od-fill od-stack" style="--od-gap:2px"><span class="pick__time">' + p.t + '</span>'
+          + '<span class="pick__wait">' + p.wait + '</span></span></button>').join('')
+        + '</div>'
+      : '<div class="note">' + icon('clock', 14) + '<span>Belum ada slot pengambilan. Kantin sedang tutup.</span></div>');
 
   return '<div style="margin-top:var(--space-2)">' + lines + '</div>'
     + '<div class="card" style="padding:var(--space-4);margin-top:var(--space-4)">'
@@ -635,8 +861,8 @@ function viewCart() {
     + pickup
     + '<div class="section-title">Catatan (opsional)</div>'
     + '<textarea class="input" id="note" rows="2" maxlength="255" placeholder="Contoh: tanpa sambal" style="resize:vertical;font-family:inherit">' + esc(state.note || '') + '</textarea>'
-    + '<button class="btn btn--accent btn--lg btn--block" style="margin-top:var(--space-4)" data-action="to-payment"' + (state.pickup ? '' : ' disabled') + '>'
-    + (state.pickup ? 'Lanjut ke Pembayaran' : 'Pilih jam ambil dulu') + icon('arrowRight', 18) + '</button>';
+    + '<button class="btn btn--accent btn--lg btn--block" style="margin-top:var(--space-4)" data-action="to-payment"' + (picked ? '' : ' disabled') + '>'
+    + (picked ? 'Lanjut ke Pembayaran' : slots.length ? 'Pilih jam ambil dulu' : 'Belum ada slot pickup') + icon('arrowRight', 18) + '</button>';
 }
 
 function viewPayment() {
@@ -669,11 +895,12 @@ function viewPayment() {
 function viewSuccess() {
   const o = orderById(state.lastOrderId) || myOrders()[0];
   if (!o) return viewMenu();
+  const paid = ['paid', 'ready', 'completed'].includes(o.status);
   const deadline = o.expiresAt ? String(o.expiresAt).slice(11, 16) : null;
   return '<div style="display:grid;place-items:center;gap:var(--space-3);padding:var(--space-8) 0 var(--space-4);text-align:center">'
     + '<div style="width:84px;height:84px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--status-completed) 16%,transparent);color:var(--status-completed)">' + icon('checkCircle', 44) + '</div>'
-    + '<div style="font-family:var(--font-display);font-weight:800;font-size:22px">Pesanan Dibuat</div>'
-    + '<div class="muted" style="font-size:13.5px">Menunggu konfirmasi pembayaran.</div>'
+    + '<div style="font-family:var(--font-display);font-weight:800;font-size:22px">' + (paid ? 'Pembayaran Berhasil' : 'Pesanan Dibuat') + '</div>'
+    + '<div class="muted" style="font-size:13.5px">' + (paid ? 'Pesananmu sudah dibayar dan menunggu disiapkan.' : 'Menunggu konfirmasi pembayaran.') + '</div>'
     + '</div>'
     + '<div class="card" style="padding:var(--space-5)">'
     + '<div class="summary-row"><span class="muted">Order ID</span><span style="font-weight:600">' + esc(o.code || o.id) + '</span></div>'
@@ -681,12 +908,20 @@ function viewSuccess() {
     + '<div class="summary-row"><span class="muted">Jumlah item</span><span style="font-weight:600">' + o.items.reduce((s, l) => s + l.qty, 0) + '</span></div>'
     + '<div class="summary-row summary-row--total"><span>Total</span><span class="od-nowrap">' + fmt(o.total) + '</span></div>'
     + '</div>'
-    + (deadline ? '<div class="note" style="margin-top:var(--space-4)">' + icon('clock', 14)
+    + (deadline && !paid ? '<div class="note" style="margin-top:var(--space-4)">' + icon('clock', 14)
       + '<span>Bayar sebelum pukul ' + deadline + ', kalau lewat pesanan dibatalkan dan stok kembali.</span></div>' : '')
     + '<div style="display:grid;gap:var(--space-3);margin-top:var(--space-4)">'
     + '<button class="btn btn--primary btn--lg btn--block" data-action="order-detail" data-order="' + o.id + '">Lacak Pesanan</button>'
     + '<button class="btn btn--secondary btn--block" data-action="go" data-route="menu">Kembali ke Menu</button>'
     + '</div>';
+}
+
+/* Judul kartu memakai nama menu; kode order tetap terlihat di halaman detail. */
+function orderMenuLabel(o) {
+  const lines = o.items || [];
+  if (!lines.length) return o.code || o.id;
+  const names = lines.map(l => l.name + (l.qty > 1 ? ' × ' + l.qty : ''));
+  return names.length > 2 ? names.slice(0, 2).join(', ') + ' +' + (names.length - 2) + ' lainnya' : names.join(', ');
 }
 
 function viewOrders() {
@@ -700,7 +935,7 @@ function viewOrders() {
   }
   return '<div style="margin-top:var(--space-2)">' + list.map(o => {
     return '<button class="order-card" style="width:100%;text-align:left;cursor:pointer;margin-top:var(--space-3)" data-action="order-detail" data-order="' + o.id + '">'
-      + '<div class="od-row"><div class="od-fill od-stack" style="--od-gap:2px"><span style="font-weight:600;font-size:14px">' + esc(o.code || o.id) + '</span>'
+      + '<div class="od-row"><div class="od-fill od-stack" style="--od-gap:2px"><span style="font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(orderMenuLabel(o)) + '</span>'
       + '<span class="muted" style="font-size:12px">Pickup ' + esc(pickupLabel(o)) + ' · ' + o.items.length + ' jenis item</span></div>'
       + statusBadge(o.status) + '</div>'
       + '<div class="od-row"><span class="od-fill" style="font-family:var(--font-display);font-weight:700;font-size:16px" >' + fmt(o.total) + '</span>'
@@ -779,7 +1014,7 @@ function accountRows(rows) {
 function viewAccountStudent() {
   const name = state.user ? state.user.nama : 'Mahasiswa';
   const id = state.user ? state.user.nim : '-';
-  const rows = [['receipt', 'Riwayat Pesanan', 'orders'], ['bell', 'Preferensi Notifikasi', 'notifikasi'], ['info', 'Bantuan & Panduan', 'bantuan'], ['store', 'Tentang Kantin', 'tentang']];
+  const rows = [['bell', 'Preferensi Notifikasi', 'notifikasi'], ['info', 'Bantuan & Panduan', 'bantuan'], ['store', 'Tentang Kantin', 'tentang']];
   return accountHeader(name, (id && id !== '-' ? 'NIM ' + id : (state.user ? state.user.email : '')), 'Mahasiswa') + accountRows(rows);
 }
 
@@ -796,32 +1031,54 @@ function subpageHead(title, sub) {
     + (sub ? '<div class="subpage-head__sub">' + sub + '</div>' : '') + '</div>';
 }
 
-function toggleRow(label, desc, on) {
+function toggleSwitch(on, action, label, disabled, attrs) {
+  return '<button class="toggle" data-action="' + (action || 'toggle-pref') + '"' + (attrs || '')
+    + ' role="switch" aria-checked="' + (on ? 'true' : 'false') + '" aria-label="' + esc(label) + '"'
+    + (disabled ? ' aria-disabled="true" disabled' : '') + '>'
+    + '<span class="toggle__track"><span class="toggle__dot"></span></span></button>';
+}
+
+function toggleRow(label, desc, on, action, disabled) {
   return '<div class="pref"><div class="od-fill">'
     + '<div class="pref__label">' + label + '</div>'
     + (desc ? '<div class="pref__desc">' + desc + '</div>' : '') + '</div>'
-    + '<button class="toggle" data-action="toggle-pref" role="switch" aria-checked="' + (on ? 'true' : 'false') + '" aria-label="' + label + '">'
-    + '<span class="toggle__track"><span class="toggle__dot"></span></span></button></div>';
+    + toggleSwitch(on, action, label, disabled) + '</div>';
+}
+
+function pushCard() {
+  if (!state.role) return '';
+  const admin = state.role === 'admin';
+  const on = pushState === 'subscribed';
+  const disabled = pushState === 'unsupported' || pushState === 'denied';
+  const label = admin ? 'Pesanan baru masuk' : 'Pesanan siap diambil';
+  const desc = {
+    unsupported: 'Browser ini tidak mendukung notifikasi push. Gunakan browser modern melalui HTTPS atau localhost.',
+    denied: 'Izin notifikasi diblokir. Izinkan untuk situs ini di pengaturan browser, lalu muat ulang halaman.',
+    error: 'Terjadi kendala saat menyiapkan notifikasi. Ketuk untuk mencoba lagi.',
+    subscribed: admin
+      ? 'Pesanan yang sudah dibayar akan diberitahukan ke perangkat ini.'
+      : 'Pesanan yang siap akan diberitahukan ke perangkat ini.',
+    default: admin
+      ? 'Terima pemberitahuan saat mahasiswa membayar pesanan, walau aplikasi ditutup.'
+      : 'Terima pemberitahuan "Pesananmu telah siap" walau aplikasi ditutup.'
+  }[pushState];
+
+  return '<div class="card" style="padding:0 var(--space-4);margin-top:var(--space-4)">'
+    + toggleRow(label, desc, on, 'toggle-push', disabled)
+    + '</div>';
 }
 
 function viewNotifikasi() {
   const admin = state.role === 'admin';
-  const rows = admin
-    ? [['Pesanan baru masuk', 'Saat mahasiswa membayar pesanannya', true],
-       ['Stok menipis', 'Peringatan saat stok di bawah 5 porsi', true],
-       ['Ulasan mahasiswa', 'Saat ada rating atau masukan baru', false],
-       ['Laporan harian', 'Ringkasan penjualan tiap pukul 17.00', true]]
-    : [['Pesanan siap diambil', 'Saat admin menandai pesananmu siap', true],
-       ['Pengingat jam ambil', '10 menit sebelum slot pengambilan', true],
-       ['Promo & diskon', 'Info menu baru dan promo kantin', false],
-       ['Ringkasan transaksi', 'Rekap pembelian bulanan', false]];
-  return subpageHead('Preferensi Notifikasi', admin ? 'Atur pemberitahuan untuk panel admin.' : 'Pilih kabar yang ingin kamu terima.')
-    + '<div class="card" style="padding:0 var(--space-4);margin-top:var(--space-4)">'
-    + rows.map(r => toggleRow(r[0], r[1], r[2])).join('') + '</div>';
+  return subpageHead('Preferensi Notifikasi', admin
+    ? 'Aktifkan pemberitahuan pesanan baru di perangkat ini.'
+    : 'Aktifkan pemberitahuan status pesanan di perangkat ini.')
+    + pushCard();
 }
 
 function viewBantuan() {
   const admin = state.role === 'admin';
+  const kontak = (state.profile && state.profile.kontak) || '';
   const faqs = admin
     ? [['Bagaimana menandai pesanan siap?', 'Buka papan Pesanan, lalu tekan tombol Siap pada kartu berstatus Dibayar.'],
        ['Bagaimana mengubah stok?', 'Buka Menu & Stok, gunakan tombol tambah atau kurang pada tiap hidangan.'],
@@ -837,40 +1094,68 @@ function viewBantuan() {
     + '<div class="card" style="padding:var(--space-4);margin-top:var(--space-4)"><div class="od-row">'
     + '<span class="rowlink__ic">' + icon('info', 20) + '</span>'
     + '<div class="od-fill"><div style="font-weight:600;font-size:14px">Masih butuh bantuan?</div>'
-    + '<div class="muted" style="font-size:12.5px">Hubungi admin kantin di 0812-3456-7890</div></div></div></div>';
+    + '<div class="muted" style="font-size:12.5px">' + (kontak ? 'Hubungi admin kantin di ' + esc(kontak) : 'Kontak admin belum diatur.') + '</div></div></div></div>';
 }
 
 function viewTentang() {
-  const info = [['Lokasi', 'Gedung A, Lantai 1'], ['Jam buka', 'Senin - Jumat, 07.00 - 17.00'], ['Kontak', '0812-3456-7890'], ['Versi', '1.0.0 (prototipe)']];
+  const p = state.profile || {};
+  const info = [
+    ['Lokasi', p.lokasi || '-'],
+    ['Jam buka', todayHoursLabel()],
+    ['Kontak', p.kontak || '-'],
+    ['Versi', '1.0.0 (prototipe)']
+  ];
   return subpageHead('Tentang Kantin', 'Pre-order makanan kampus tanpa antre.')
     + '<div class="card" style="padding:var(--space-5);margin-top:var(--space-4);display:grid;gap:var(--space-2)">'
     + '<span class="logo" style="width:60px;height:60px;border-radius:18px">' + icon('utensils', 26) + '</span>'
-    + '<div style="font-family:var(--font-display);font-weight:700;font-size:16px;margin-top:var(--space-2)">Kantin Kampus</div>'
-    + '<p class="muted" style="font-size:13px;line-height:1.6;margin:0">Layanan pre-order kantin kampus yang membantu mahasiswa memesan lebih cepat dan memilih jam pengambilan tanpa mengantre, serta membantu pengelola kantin mengatur pesanan dan stok.</p></div>'
+    + '<div style="font-family:var(--font-display);font-weight:700;font-size:16px;margin-top:var(--space-2)">' + esc(kantinName()) + '</div>'
+    + '<p class="muted" style="font-size:13px;line-height:1.6;margin:0">' + esc(p.deskripsi || 'Layanan pre-order kantin kampus yang membantu mahasiswa memesan lebih cepat dan memilih jam pengambilan tanpa mengantre, serta membantu pengelola kantin mengatur pesanan dan stok.') + '</p></div>'
     + '<div class="card" style="padding:0 var(--space-4);margin-top:var(--space-4)">'
     + info.map(x => '<div class="rowlink" style="cursor:default"><span class="od-fill muted" style="font-size:13px">' + x[0] + '</span>'
-        + '<span style="font-weight:600;font-size:13.5px">' + x[1] + '</span></div>').join('')
+        + '<span style="font-weight:600;font-size:13.5px">' + esc(x[1]) + '</span></div>').join('')
     + '</div>';
 }
 
 function viewProfilKantin() {
+  const p = state.profile || {};
   return subpageHead('Profil Kantin', 'Informasi yang dilihat mahasiswa di aplikasi.')
     + '<div class="card" style="padding:var(--space-4);margin-top:var(--space-4);display:grid;gap:var(--space-3)">'
-    + field('kantin-nama', 'Nama kantin', 'text', '', 'Kantin Kampus')
-    + field('kantin-lokasi', 'Lokasi', 'text', '', 'Gedung A, Lantai 1')
-    + field('kantin-kontak', 'Kontak', 'tel', '', '0812-3456-7890')
-    + '<div class="field"><label class="field__label" for="f-kantin-desk">Deskripsi</label>'
-    + '<input class="input" id="f-kantin-desk" name="kantin-desk" type="text" value="Masakan rumahan segar setiap hari." autocomplete="off" /></div>'
+    + field('kantin-nama', 'Nama kantin', 'text', 'Kantin Kampus', p.nama || '', true)
+    + field('kantin-lokasi', 'Lokasi', 'text', 'Gedung A, Lantai 1', p.lokasi || '')
+    + field('kantin-kontak', 'Kontak', 'tel', '0812-3456-7890', p.kontak || '')
+    + field('kantin-desk', 'Deskripsi', 'text', 'Masakan rumahan segar setiap hari.', p.deskripsi || '')
     + '</div>'
-    + '<button class="btn btn--primary btn--block" style="margin-top:var(--space-4)" data-action="save-pref">' + icon('check', 18) + 'Simpan perubahan</button>';
+    + '<button class="btn btn--primary btn--block" style="margin-top:var(--space-4)" data-action="save-kantin-profile">' + icon('check', 18) + 'Simpan perubahan</button>';
+}
+
+function hoursRow(h) {
+  return '<div class="hours" data-day="' + h.day + '"' + (h.open ? '' : ' data-closed="true"') + '>'
+    + '<div class="pref"><div class="od-fill">'
+    + '<div class="pref__label">' + esc(h.name) + '</div>'
+    + '<div class="pref__desc" data-hours-status>' + (h.open ? h.openAt + '–' + h.closeAt : 'Tutup') + '</div></div>'
+    + toggleSwitch(h.open, 'toggle-hours', 'Buka hari ' + h.name, false, ' data-day="' + h.day + '"')
+    + '</div>'
+    + '<div class="hours__times"' + (h.open ? '' : ' hidden') + '>'
+    + '<label>Jam buka<input class="input" type="time" id="f-hours-' + h.day + '-open" value="' + esc(h.openAt) + '" /></label>'
+    + '<label>Jam tutup<input class="input" type="time" id="f-hours-' + h.day + '-close" value="' + esc(h.closeAt) + '" /></label>'
+    + '</div></div>';
 }
 
 function viewJamOperasional() {
-  const days = [['Senin', '07.00 - 16.00', true], ['Selasa', '07.00 - 16.00', true], ['Rabu', '07.00 - 16.00', true], ['Kamis', '07.00 - 16.00', true], ['Jumat', '07.00 - 15.00', true], ['Sabtu', '08.00 - 13.00', false], ['Minggu', 'Tutup', false]];
+  const today = state.hours ? hoursFor(dayOfWeek(new Date())) : null;
+  const status = !state.hours
+    ? 'Jam operasional belum dimuat.'
+    : today && today.open
+      ? 'Hari ini buka ' + today.openAt + '–' + today.closeAt + '.'
+      : 'Hari ini tutup.';
   return subpageHead('Jam Operasional', 'Atur jam buka kantin per hari.')
+    + '<div class="note" style="margin-top:var(--space-4)">' + icon('info', 14) + '<span>' + esc(status)
+    + ' Perubahan langsung dipakai untuk slot pengambilan.</span></div>'
     + '<div class="card" style="padding:0 var(--space-4);margin-top:var(--space-4)">'
-    + days.map(d => toggleRow(d[0], d[1], d[2])).join('') + '</div>'
-    + '<div class="note" style="margin-top:var(--space-4)">' + icon('info', 14) + '<span>Perubahan jam berlaku untuk slot pengambilan besok.</span></div>';
+    + (state.hours && state.hours.length ? state.hours.map(hoursRow).join('') : '<div class="pref"><span class="muted" style="font-size:13px">Belum ada data jam operasional.</span></div>')
+    + '</div>'
+    + '<button class="btn btn--primary btn--block" style="margin-top:var(--space-4)" data-action="save-kantin-hours"' + (state.hours ? '' : ' disabled') + '>'
+    + icon('check', 18) + 'Simpan perubahan</button>';
 }
 
 /* ---------- Admin views ---------- */
@@ -884,7 +1169,7 @@ function orderCardAdmin(o) {
   const items = o.items.map(l => '<span><b>' + esc(l.name) + '</b> × ' + l.qty + '</span>').join('');
   let actions = '';
   if (o.status === 'pending') {
-    actions = '<button class="btn btn--secondary btn--sm" data-action="admin-confirm" data-order="' + o.id + '">Tandai Dibayar</button>';
+    actions = '<span class="muted" style="font-size:12px;align-self:center">Menunggu pembayaran</span>';
   } else if (o.status === 'paid') {
     actions = '<button class="btn btn--primary btn--sm" data-action="admin-ready" data-order="' + o.id + '">' + icon('box', 16) + 'Siap</button>';
   } else if (o.status === 'ready') {
@@ -910,6 +1195,39 @@ const BOARD_FILTERS = [
   { id: 'ready', label: 'Siap diambil' },
   { id: 'completed', label: 'Selesai' }
 ];
+
+const REVENUE_STATUSES = ['paid', 'ready', 'completed'];
+
+function revenueCell(label, value) {
+  return '<div class="revenue__cell"><span class="revenue__cell-label">' + label + '</span>'
+    + '<span class="revenue__cell-value">' + fmt(value) + '</span></div>';
+}
+
+/* Pemasukan dihitung dari order yang sudah dibayar; pending dan batal tidak masuk. */
+function revenueCard(all) {
+  const paid = all.filter(o => REVENUE_STATUSES.includes(o.status));
+  const total = paid.reduce((sum, o) => sum + o.total, 0);
+  const today = dateOnly(new Date());
+  const month = today.slice(0, 7);
+  const sumOn = prefix => paid
+    .filter(o => String(o.createdAt || '').startsWith(prefix))
+    .reduce((sum, o) => sum + o.total, 0);
+
+  return '<div class="card revenue">'
+    + '<div class="od-row">'
+    + '<div class="od-fill od-stack" style="--od-gap:2px">'
+    + '<span class="revenue__label">Total pemasukan</span>'
+    + '<span class="revenue__total">' + fmt(total) + '</span>'
+    + '<span class="muted" style="font-size:12px">' + paid.length + ' pesanan dibayar</span>'
+    + '</div>'
+    + '<span class="revenue__icon">' + icon('wallet', 20) + '</span>'
+    + '</div>'
+    + '<div class="revenue__split">'
+    + revenueCell('Hari ini', sumOn(today))
+    + revenueCell('Bulan ini', sumOn(month))
+    + '</div>'
+    + '</div>';
+}
 
 function viewBoard() {
   /* Pesanan terbaru selalu di atas; id jadi pembeda bila created_at sama. */
@@ -942,7 +1260,7 @@ function viewBoard() {
       + '<div><div style="font-weight:600;color:var(--foreground)">' + (state.boardFilter === 'all' ? 'Belum ada pesanan masuk' : 'Tidak ada order dengan status ini') + '</div>'
       + '<div style="font-size:13px;margin-top:4px">' + (state.boardFilter === 'all' ? 'Pesanan baru muncul otomatis di sini.' : 'Coba pilih filter lain.') + '</div></div></div>';
 
-  return summary + '<div>' + rail + '</div>' + head + cards;
+  return revenueCard(all) + summary + '<div>' + rail + '</div>' + head + cards;
 }
 
 function viewStock() {
@@ -964,7 +1282,10 @@ function viewStock() {
       + '<span style="font-weight:600;font-size:13.5px" class="od-clamp-2">' + esc(i.name) + '</span>'
       + '<span class="muted od-nowrap" style="font-size:12px">' + fmt(i.price) + ' · ' + i.cat + '</span></div>'
       + badge
-      + '<button class="iconbtn iconbtn--end" data-action="edit-menu" data-item="' + i.id + '" aria-label="Edit ' + esc(i.name) + '">' + icon('pencil', 18) + '</button>'
+      + '<span class="od-nowrap" style="display:flex;align-items:center;margin-left:auto">'
+      + '<button class="iconbtn iconbtn--end" style="margin-right:0" data-action="edit-menu" data-item="' + i.id + '" aria-label="Edit ' + esc(i.name) + '">' + icon('pencil', 18) + '</button>'
+      + '<button class="iconbtn iconbtn--end" data-action="delete-menu" data-item="' + i.id + '" aria-label="Hapus ' + esc(i.name) + '">' + icon('trash', 18) + '</button>'
+      + '</span>'
       + '</div>'
       + '<div class="od-row"><span class="od-fill" style="font-size:12px;color:var(--foreground-muted)">Stok tersedia</span>'
       + '<div class="stepper" role="group" aria-label="Stok ' + esc(i.name) + '">'
@@ -1054,9 +1375,36 @@ function viewMenuForm() {
     + '</form>';
 }
 
+function viewDeleteMenu() {
+  const it = item(state.menuDeleteId);
+  if (!it) return '';
+  return '<div class="modal-backdrop" data-action="close-delete-menu"></div>'
+    + '<div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="delete-menu-title">'
+    + '<div class="modal-sheet__head"><div class="od-fill od-stack" style="--od-gap:2px">'
+    + '<span class="modal-sheet__eyebrow">Hapus menu</span>'
+    + '<span class="modal-sheet__title" id="delete-menu-title">' + esc(it.name) + '</span></div>'
+    + '<button type="button" class="iconbtn iconbtn--end" data-action="close-delete-menu" aria-label="Tutup">' + icon('x', 20) + '</button></div>'
+    + '<div class="modal-sheet__body"><div class="note">' + icon('alert', 14)
+    + '<span>Menu hilang dari daftar dan menu mahasiswa. Riwayat pesanan lama tetap tersimpan.</span></div></div>'
+    + '<div class="modal-sheet__foot">'
+    + '<button type="button" class="btn btn--secondary" data-action="close-delete-menu">Batal</button>'
+    + '<button type="button" class="btn btn--danger" data-action="confirm-delete-menu">' + icon('trash', 18) + 'Hapus Menu</button>'
+    + '</div></div>';
+}
+
 function renderMenuForm(force) {
   const root = $('modal');
   if (!root) return;
+  if (state.menuDeleteId) {
+    const key = 'delete:' + state.menuDeleteId;
+    if (!force && !root.hidden && root.dataset.form === key) return;
+    const html = viewDeleteMenu();
+    root.classList.remove('is-closing');
+    root.innerHTML = html;
+    root.dataset.form = key;
+    root.hidden = !html;
+    return;
+  }
   if (!state.menuForm) {
     if (root.hidden || root.classList.contains('is-closing')) return;
     if (reducedMotion()) { resetMenuForm(root); return; }
@@ -1121,12 +1469,14 @@ function renderView() {
 
 /* ---------- Actions ---------- */
 /* ---------- Data + aksi ke API ---------- */
-const dataLoaded = { menu: false, orders: false };
+const dataLoaded = { menu: false, orders: false, profile: false, hours: false };
 
 function pageNeeds(page) {
   return {
     menu: ['menu', 'cart', 'payment', 'stock'].includes(page),
-    orders: ['orders', 'tracking', 'success', 'board'].includes(page)
+    orders: ['orders', 'tracking', 'success', 'board'].includes(page),
+    profile: ['menu', 'profilKantin', 'tentang', 'bantuan'].includes(page),
+    hours: ['menu', 'cart', 'payment', 'tentang', 'jamOperasional'].includes(page)
   };
 }
 
@@ -1134,7 +1484,9 @@ function pageNeeds(page) {
 function dataSignature(page) {
   const needs = pageNeeds(page);
   return (needs.menu ? JSON.stringify(state.menu) : '')
-    + '|' + (needs.orders ? JSON.stringify(state.orders) : '');
+    + '|' + (needs.orders ? JSON.stringify(state.orders) : '')
+    + '|' + (needs.profile ? JSON.stringify(state.profile) : '')
+    + '|' + (needs.hours ? JSON.stringify(state.hours) : '');
 }
 
 async function loadData() {
@@ -1153,6 +1505,23 @@ async function loadData() {
       dataLoaded.orders = true;
     }));
   }
+  if (needs.profile) {
+    jobs.push(api('/kantin/profile').then(row => {
+      state.profile = {
+        nama: row.nama || '',
+        lokasi: row.lokasi || '',
+        kontak: row.kontak || '',
+        deskripsi: row.deskripsi || ''
+      };
+      dataLoaded.profile = true;
+    }));
+  }
+  if (needs.hours) {
+    jobs.push(api('/kantin/hours').then(res => {
+      state.hours = mapHours(res.jam);
+      dataLoaded.hours = true;
+    }));
+  }
   await Promise.all(jobs);
 }
 
@@ -1168,9 +1537,14 @@ function setSession(token, user) {
   /* Jangan bawa cache data milik sesi sebelumnya ke akun yang baru login. */
   state.menu = [];
   state.orders = [];
+  state.profile = null;
+  state.hours = null;
   dataLoaded.menu = false;
   dataLoaded.orders = false;
+  dataLoaded.profile = false;
+  dataLoaded.hours = false;
   auth.save(token, state.user);
+  syncPushSubscription();
 }
 
 async function doLogin() {
@@ -1265,8 +1639,8 @@ async function doPay() {
     try { cfg = await api('/payments/config'); } catch (e) { /* gateway opsional */ }
 
     if (!cfg || !cfg.enabled || !res.payment_token || /^dummy-/.test(res.payment_token)) {
-      // ponytail: Midtrans belum dikonfigurasi -> anggap pesanan menunggu konfirmasi manual.
-      done('Pesanan dibuat · ' + res.order_code, 'checkCircle');
+      const paid = res.status === 'paid';
+      done((paid ? 'Pembayaran berhasil · ' : 'Pesanan dibuat · ') + res.order_code, 'checkCircle');
       return;
     }
 
@@ -1346,6 +1720,7 @@ let cameraStream = null;
 function openMenuForm(mode, id) {
   if (mode === 'edit' && !item(id)) return;
   closeCamera();
+  state.menuDeleteId = null;
   state.menuForm = { mode: mode, id: id || null, error: null, imageFile: null };
   renderMenuForm(true);
   const first = $('f-menu-nama');
@@ -1365,6 +1740,34 @@ function closeMenuForm() {
   releaseMenuPreview();
   state.menuForm = null;
   renderMenuForm();
+}
+
+function openDeleteMenu(id) {
+  if (!item(id)) return;
+  closeCamera();
+  state.menuForm = null;
+  state.menuDeleteId = String(id);
+  renderMenuForm(true);
+}
+
+function closeDeleteMenu() {
+  state.menuDeleteId = null;
+  renderMenuForm();
+}
+
+async function deleteMenu(id) {
+  const it = item(id);
+  if (!it) { closeDeleteMenu(); return; }
+  try {
+    await api('/admin/menus/' + id, { method: 'DELETE' });
+    state.menu = state.menu.filter(m => m.id !== String(id));
+    delete state.cart[String(id)];
+    state.menuDeleteId = null;
+    renderView();
+    toast('Menu "' + it.name + '" dihapus.', 'trash');
+  } catch (e) {
+    toast(e.message, 'alert');
+  }
 }
 
 function setMenuImageFile(file, fromCamera) {
@@ -1566,6 +1969,87 @@ async function saveMenuForm() {
   }
 }
 
+async function saveKantinProfile(btn) {
+  const value = id => { const el = $('f-' + id); return el ? el.value.trim() : ''; };
+  const payload = {
+    nama: value('kantin-nama'),
+    lokasi: value('kantin-lokasi'),
+    kontak: value('kantin-kontak'),
+    deskripsi: value('kantin-desk')
+  };
+  if (!payload.nama) { toast('Nama kantin wajib diisi.', 'alert'); return; }
+  if (btn) btn.disabled = true;
+
+  try {
+    const row = await api('/admin/kantin/profile', { method: 'PATCH', body: payload });
+    state.profile = {
+      nama: row.nama || '',
+      lokasi: row.lokasi || '',
+      kontak: row.kontak || '',
+      deskripsi: row.deskripsi || ''
+    };
+    dataLoaded.profile = true;
+    renderView();
+    toast('Profil kantin disimpan.', 'checkCircle');
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    toast(e.message || 'Gagal menyimpan profil kantin.', 'alert');
+  }
+}
+
+function toggleHours(btn) {
+  const row = btn.closest('.hours');
+  if (!row) return;
+  const on = btn.getAttribute('aria-checked') !== 'true';
+  btn.setAttribute('aria-checked', on ? 'true' : 'false');
+  row.classList.toggle('is-closed', !on);
+  const times = row.querySelector('.hours__times');
+  if (times) times.hidden = !on;
+  const status = row.querySelector('[data-hours-status]');
+  if (status) status.textContent = on ? 'Buka' : 'Tutup';
+}
+
+async function saveKantinHours(btn) {
+  if (!state.hours || state.hours.length !== 7) {
+    toast('Data jam operasional belum siap.', 'alert');
+    return;
+  }
+
+  const rows = state.hours.map(h => {
+    const row = document.querySelector('.hours[data-day="' + h.day + '"]');
+    const toggle = row ? row.querySelector('.toggle') : null;
+    const openEl = $('f-hours-' + h.day + '-open');
+    const closeEl = $('f-hours-' + h.day + '-close');
+    return {
+      day_of_week: h.day,
+      is_open: toggle ? toggle.getAttribute('aria-checked') === 'true' : h.open,
+      open_time: openEl ? openEl.value : h.openAt,
+      close_time: closeEl ? closeEl.value : h.closeAt
+    };
+  });
+
+  if (rows.some(r => !r.open_time || !r.close_time)) {
+    toast('Jam buka dan jam tutup wajib diisi.', 'alert');
+    return;
+  }
+  if (rows.some(r => r.is_open && r.open_time >= r.close_time)) {
+    toast('Jam tutup harus setelah jam buka.', 'alert');
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  try {
+    const res = await api('/admin/kantin/hours', { method: 'PATCH', body: { jam: rows } });
+    state.hours = mapHours(res.jam);
+    dataLoaded.hours = true;
+    renderView();
+    toast('Jam operasional disimpan.', 'checkCircle');
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    toast(e.message || 'Gagal menyimpan jam operasional.', 'alert');
+  }
+}
+
 function handle(action, el) {
   const d = el.dataset;
   switch (action) {
@@ -1578,8 +2062,23 @@ function handle(action, el) {
       el.setAttribute('aria-checked', on ? 'false' : 'true');
       return;
     }
-    case 'save-pref': toast('Perubahan disimpan.', 'checkCircle'); return;
+    case 'save-kantin-profile': saveKantinProfile(el); return;
+    case 'toggle-hours': toggleHours(el); return;
+    case 'save-kantin-hours': saveKantinHours(el); return;
+    case 'toggle-push':
+      if (pushBusy || pushState === 'unsupported' || pushState === 'denied') return;
+      if (pushState === 'subscribed') disablePush(); else enablePush();
+      return;
 
+    case 'toggle-pass': {
+      const input = el.parentElement.querySelector('input');
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      el.setAttribute('aria-pressed', String(show));
+      el.setAttribute('aria-label', show ? 'Sembunyikan password' : 'Tampilkan password');
+      el.innerHTML = icon(show ? 'eyeOff' : 'eye', 18);
+      return;
+    }
     case 'set-auth-role':
       state.authRole = d.role; state.formError = null; state.authMode = 'login';
       renderView(); return;
@@ -1595,10 +2094,7 @@ function handle(action, el) {
       state.authMode = 'login'; renderView(); return;
 
     case 'logout':
-      auth.clear();
-      state.role = null; state.user = null; state.cart = {}; state.pickup = null;
-      state.authMode = 'login'; state.formError = null;
-      navigate('auth', { replace: true, flash: { msg: 'Kamu sudah keluar.', ic: 'logout' } }); return;
+      doLogout(); return;
 
     case 'set-category': state.category = d.cat; renderView(); return;
 
@@ -1625,7 +2121,12 @@ function handle(action, el) {
     case 'select-pickup': state.pickup = d.time; renderView(); return;
     case 'select-pay': state.payMethod = d.method; renderView(); return;
     case 'to-payment':
-      if (!state.pickup) return;
+      if (!pickupSlots().some(p => p.t === state.pickup)) {
+        state.pickup = null;
+        toast('Jam ambil yang dipilih sudah tidak tersedia. Pilih ulang.', 'alert');
+        renderView();
+        return;
+      }
       navigate('payment'); return;
     case 'pay': doPay(); return;
     case 'order-detail': state.lastOrderId = String(d.order); navigate('tracking'); return;
@@ -1635,16 +2136,9 @@ function handle(action, el) {
       return;
 
     case 'admin-filter': state.boardFilter = d.filter; renderView(); return;
-    case 'admin-confirm': {
-      const o = orderById(d.order);
-      updateOrderStatus(d.order, 'paid', 'Pembayaran ' + (o ? o.code : d.order) + ' dikonfirmasi.');
+    case 'admin-ready':
+      updateOrderStatus(d.order, 'ready', 'Pesanan ditandai siap diambil.');
       return;
-    }
-    case 'admin-ready': {
-      const o = orderById(d.order);
-      updateOrderStatus(d.order, 'ready', (o ? o.buyerName : 'Pesanan') + ' dinotifikasi: pesanan siap.');
-      return;
-    }
     case 'admin-complete':
       updateOrderStatus(d.order, 'completed', 'Pesanan selesai.');
       return;
@@ -1667,6 +2161,9 @@ function handle(action, el) {
     case 'edit-menu': openMenuForm('edit', d.item); return;
     case 'close-menu-form': closeMenuForm(); return;
     case 'save-menu': saveMenuForm(); return;
+    case 'delete-menu': openDeleteMenu(d.item); return;
+    case 'close-delete-menu': closeDeleteMenu(); return;
+    case 'confirm-delete-menu': deleteMenu(state.menuDeleteId); return;
     case 'pick-menu-image': {
       const el = $('f-menu-image-file');
       if (el) el.click();
@@ -1753,6 +2250,11 @@ document.addEventListener('keydown', e => {
     closeCamera();
     return;
   }
+  if (state.menuDeleteId) {
+    e.preventDefault();
+    closeDeleteMenu();
+    return;
+  }
   if (state.menuForm) {
     e.preventDefault();
     closeMenuForm();
@@ -1832,6 +2334,8 @@ async function boot() {
     state.role = null;
     state.user = null;
   }
+
+  if (state.role) syncPushSubscription();
 
   if (PAGE === 'auth') {
     if (state.role) { goToRoute(roleHome(), { replace: true }); return; }

@@ -82,6 +82,20 @@ function mapMenu(row) {
   };
 }
 
+function mapHours(rows) {
+  const names = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+  return (rows || []).map(r => {
+    const day = Number(r.day_of_week);
+    return {
+      day: day,
+      name: r.hari || names[day - 1] || '',
+      open: !!r.is_open,
+      openAt: String(r.open_time || '07:00').slice(0, 5),
+      closeAt: String(r.close_time || '16:00').slice(0, 5)
+    };
+  });
+}
+
 function mapOrder(row) {
   const lines = (row.items || []).map(it => ({
     name: it.name !== undefined ? it.name : it.nama,

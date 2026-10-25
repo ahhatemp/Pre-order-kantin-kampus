@@ -9,7 +9,7 @@ function admin_menus_all() {
 
     try {
         $pdo = get_db_connection();
-        $menus = $pdo->query('SELECT * FROM menus ORDER BY nama ASC')->fetchAll();
+        $menus = $pdo->query('SELECT * FROM menus WHERE deleted_at IS NULL ORDER BY nama ASC')->fetchAll();
         foreach ($menus as &$m) {
             $m['id'] = (int)$m['id'];
             $m['harga'] = (int)$m['harga'];
@@ -38,8 +38,8 @@ function admin_menu_create() {
     if (!$nama || $harga === null) json_error('Nama dan harga wajib diisi');
     if (!is_int($harga) && !is_float($harga)) json_error('Harga harus berupa angka positif');
     if ($harga <= 0) json_error('Harga harus berupa angka positif');
-    if ($stok !== null && (!is_int($stok) && !is_float($stok))) json_error('Stok harus berupa angka dan tidak boleh negatif');
-    if ($stok !== null && $stok < 0) json_error('Stok harus berupa angka dan tidak boleh negatif');
+    if ($stok !== null && !is_int($stok)) json_error('Stok harus berupa bilangan bulat dan tidak boleh negatif');
+    if ($stok !== null && $stok < 0) json_error('Stok harus berupa bilangan bulat dan tidak boleh negatif');
 
     try {
         $pdo = get_db_connection();
@@ -59,7 +59,7 @@ function admin_menu_detail($id) {
 
     try {
         $pdo = get_db_connection();
-        $stmt = $pdo->prepare('SELECT * FROM menus WHERE id = ?');
+        $stmt = $pdo->prepare('SELECT * FROM menus WHERE id = ? AND deleted_at IS NULL');
         $stmt->execute([$id]);
         $menu = $stmt->fetch();
         if (!$menu) json_error('Menu tidak ditemukan', 404);
@@ -119,7 +119,7 @@ function admin_menu_update($id) {
 
     try {
         $pdo = get_db_connection();
-        $exists = $pdo->prepare('SELECT id FROM menus WHERE id = ?');
+        $exists = $pdo->prepare('SELECT id FROM menus WHERE id = ? AND deleted_at IS NULL');
         $exists->execute([$id]);
         if (!$exists->fetch()) json_error('Menu tidak ditemukan', 404);
 
@@ -140,12 +140,12 @@ function admin_menu_stock($id) {
     $body = get_json_body();
     $stok = $body['stok'] ?? null;
 
-    if (!is_int($stok) && !is_float($stok)) json_error('Stok harus berupa angka');
+    if (!is_int($stok)) json_error('Stok harus berupa bilangan bulat');
     if ($stok < 0) json_error('Stok tidak boleh negatif');
 
     try {
         $pdo = get_db_connection();
-        $exists = $pdo->prepare('SELECT id FROM menus WHERE id = ?');
+        $exists = $pdo->prepare('SELECT id FROM menus WHERE id = ? AND deleted_at IS NULL');
         $exists->execute([$id]);
         if (!$exists->fetch()) json_error('Menu tidak ditemukan', 404);
 
@@ -154,5 +154,21 @@ function admin_menu_stock($id) {
         json_response(['message' => 'Stok berhasil diperbarui']);
     } catch (PDOException $e) {
         json_error('Gagal memperbarui stok', 500);
+    }
+}
+
+function admin_menu_delete($id) {
+    $me = authenticate();
+    require_role($me, 'admin');
+
+    try {
+        $pdo = get_db_connection();
+        $stmt = $pdo->prepare('UPDATE menus SET deleted_at = NOW(), is_active = 0 WHERE id = ? AND deleted_at IS NULL');
+        $stmt->execute([$id]);
+        if ($stmt->rowCount() === 0) json_error('Menu tidak ditemukan', 404);
+        json_response(['message' => 'Menu berhasil dihapus']);
+    } catch (PDOException $e) {
+        error_log('Delete menu error: ' . $e->getMessage());
+        json_error('Gagal menghapus menu', 500);
     }
 }
