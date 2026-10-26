@@ -28,7 +28,7 @@ function push_subscribe() {
     $keys = is_array($body['keys'] ?? null) ? $body['keys'] : [];
     $p256dh = is_string($keys['p256dh'] ?? null) ? $keys['p256dh'] : '';
     $authKey = is_string($keys['auth'] ?? null) ? $keys['auth'] : '';
-    if (strlen($p256dh) > 255 || strlen($authKey) > 255) {
+    if (!push_subscription_key_valid($p256dh, 65) || !push_subscription_key_valid($authKey, 16)) {
         json_error('Kunci subscription tidak valid');
     }
 

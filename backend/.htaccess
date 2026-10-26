@@ -3,22 +3,22 @@ RewriteEngine On
 # Apache membuang header Authorization sebelum sampai ke PHP; salin ke env.
 RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
+# Jangan pernah serve isi storage langsung (kunci VAPID, rate limit, upload).
+# Foto menu tetap tersedia lewat GET /api/uploads/{file}.
+RewriteRule ^storage(?:/|$) - [F,L]
+
 # Arahkan semua request ke front controller API (file lain tidak boleh di-serve)
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteRule ^ api/index.php [L,QSA]
 
 # Jangan pernah serve file konfigurasi/skema/dokumen
-<FilesMatch "\.(env|sql|md|log|ini)$">
+<FilesMatch "\.(env|sql|md|log|ini|json)$">
   Require all denied
 </FilesMatch>
 
-# Blokir eksekusi langsung file .php selain front controller
-<IfModule mod_authz_core.c>
-  <FilesMatch "\.php$">
-    Require all denied
-  </FilesMatch>
-  <Files "index.php">
-    Require all granted
-  </Files>
-</IfModule>
+# Blokir eksekusi langsung file .php selain front controller.
+# Dicek lewat REQUEST_FILENAME agar request yang sudah di-rewrite ke
+# api/index.php tidak ikut terblokir.
+RewriteCond %{REQUEST_FILENAME} !/api/index\.php$
+RewriteRule \.php(?:/|$) - [F,L]

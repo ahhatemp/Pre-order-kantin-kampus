@@ -1,0 +1,5 @@
+# Tolak seluruh akses HTTP langsung ke folder runtime.
+# Kunci VAPID, file rate limit, dan foto upload dibaca oleh PHP, bukan disajikan Apache.
+<IfModule mod_authz_core.c>
+  Require all denied
+</IfModule>

@@ -38,4 +38,5 @@ return [
     'rate_limit_order' => (int)(getenv('RATE_LIMIT_ORDER_MAX') ?: 20),
     'order_pending_limit' => (int)(getenv('ORDER_PENDING_MAX') ?: 3),
     'push_subject' => getenv('VAPID_SUBJECT') ?: 'mailto:admin@kantin.com',
+    'vapid_key_file' => getenv('VAPID_KEY_FILE') ?: __DIR__ . '/storage/vapid.json',
 ];

@@ -1,13 +1,16 @@
 <?php
 // Web Push berpayload aes128gcm (RFC 8291); service worker menampilkan isi payload.
-require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../helpers.php';
 require_once __DIR__ . '/../db.php';
 
-const PUSH_VAPID_FILE = __DIR__ . '/../storage/vapid.json';
 const PUSH_ALLOWED_HOSTS = ['fcm.googleapis.com', 'android.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com'];
 const PUSH_ALLOWED_SUFFIXES = ['.notify.windows.com'];
 // SPKI DER untuk kunci publik P-256 tanpa kompresi, dipakai openssl_pkey_get_public.
 const PUSH_P256_SPKI_PREFIX = "\x30\x59\x30\x13\x06\x07\x2A\x86\x48\xCE\x3D\x02\x01\x06\x08\x2A\x86\x48\xCE\x3D\x03\x01\x07\x03\x42\x00";
+
+function push_vapid_file() {
+    return config()['vapid_key_file'];
+}
 
 function push_base64url($data) {
     return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
@@ -21,6 +24,16 @@ function push_base64url_decode($data) {
     return $raw === false ? '' : $raw;
 }
 
+/* Kunci dari PushSubscription.toJSON() berformat base64url.
+   p256dh = titik P-256 tanpa kompresi (65 byte, awalan 0x04); auth = 16 byte. */
+function push_subscription_key_valid($value, $expectedBytes) {
+    if (!is_string($value) || $value === '' || strlen($value) > 255) return false;
+    $raw = push_base64url_decode($value);
+    if (strlen($raw) !== $expectedBytes) return false;
+    if ($expectedBytes === 65 && $raw[0] !== "\x04") return false;
+    return true;
+}
+
 /* HKDF-Expand (RFC 5869) dengan SHA-256. */
 function push_hkdf_expand($prk, $info, $length) {
     $output = '';
@@ -32,19 +45,20 @@ function push_hkdf_expand($prk, $info, $length) {
     return substr($output, 0, $length);
 }
 
-function push_new_ec_key() {
+function push_new_ec_key($errorMessage = 'Gagal membuat kunci enkripsi push'): array {
     $options = [
         'private_key_type' => OPENSSL_KEYTYPE_EC,
         'curve_name' => 'prime256v1',
     ];
     $resource = @openssl_pkey_new($options);
     if (!$resource) {
+        // Sebagian PHP Windows tidak menemukan openssl.cnf bawaan sistem.
         while (openssl_error_string() !== false) {}
         $options['config'] = __DIR__ . '/../openssl.cnf';
         $resource = @openssl_pkey_new($options);
     }
-    if (!$resource) throw new RuntimeException('Gagal membuat kunci enkripsi push');
-    return $resource;
+    if (!$resource) throw new RuntimeException($errorMessage);
+    return [$resource, $options];
 }
 
 /* Enkripsi payload untuk satu subscription (Content-Encoding: aes128gcm). */
@@ -58,7 +72,7 @@ function push_encrypt_payload($payload, $p256dh, $authKey) {
         throw new RuntimeException('Kunci auth subscription tidak valid');
     }
 
-    $localKey = push_new_ec_key();
+    [$localKey] = push_new_ec_key();
     $details = openssl_pkey_get_details($localKey);
     if (!$details || empty($details['ec']['x']) || empty($details['ec']['y'])) {
         throw new RuntimeException('Kunci ephemeral push tidak valid');
@@ -99,25 +113,15 @@ function push_vapid_keys() {
     static $keys = null;
     if ($keys !== null) return $keys;
 
-    if (is_file(PUSH_VAPID_FILE)) {
-        $saved = json_decode((string)file_get_contents(PUSH_VAPID_FILE), true);
+    $file = push_vapid_file();
+    if (is_file($file)) {
+        $saved = json_decode((string)file_get_contents($file), true);
         if (is_array($saved) && !empty($saved['private_pem']) && !empty($saved['public_key'])) {
             return $keys = $saved;
         }
     }
 
-    $options = [
-        'private_key_type' => OPENSSL_KEYTYPE_EC,
-        'curve_name' => 'prime256v1',
-    ];
-    $resource = @openssl_pkey_new($options);
-    if (!$resource) {
-        // Sebagian PHP Windows tidak menemukan openssl.cnf bawaan sistem.
-        while (openssl_error_string() !== false) {}
-        $options['config'] = __DIR__ . '/../openssl.cnf';
-        $resource = @openssl_pkey_new($options);
-    }
-    if (!$resource) throw new RuntimeException('Gagal membuat kunci VAPID');
+    [$resource, $options] = push_new_ec_key('Gagal membuat kunci VAPID');
 
     if (!openssl_pkey_export($resource, $privatePem, null, $options)) {
         throw new RuntimeException('Gagal mengekspor kunci VAPID');
@@ -136,19 +140,18 @@ function push_vapid_keys() {
         'public_key' => push_base64url($publicKey),
     ];
 
-    $dir = dirname(PUSH_VAPID_FILE);
+    $dir = dirname($file);
     if (!is_dir($dir)) mkdir($dir, 0700, true);
-    if (file_put_contents(PUSH_VAPID_FILE, json_encode($keys), LOCK_EX) === false) {
+    if (file_put_contents($file, json_encode($keys), LOCK_EX) === false) {
         throw new RuntimeException('Gagal menyimpan kunci VAPID');
     }
-    @chmod(PUSH_VAPID_FILE, 0600);
+    @chmod($file, 0600);
 
     return $keys;
 }
 
 function push_vapid_subject() {
-    $config = require __DIR__ . '/../config.php';
-    return $config['push_subject'];
+    return config()['push_subject'];
 }
 
 /* Ubah signature DER ECDSA menjadi format mentah R||S untuk JWT ES256. */
