@@ -36,10 +36,8 @@ function admin_menu_create() {
     $imageUrl = $body['image_url'] ?? null;
 
     if (!$nama || $harga === null) json_error('Nama dan harga wajib diisi');
-    if (!is_int($harga) && !is_float($harga)) json_error('Harga harus berupa angka positif');
-    if ($harga <= 0) json_error('Harga harus berupa angka positif');
-    if ($stok !== null && !is_int($stok)) json_error('Stok harus berupa bilangan bulat dan tidak boleh negatif');
-    if ($stok !== null && $stok < 0) json_error('Stok harus berupa bilangan bulat dan tidak boleh negatif');
+    if ((!is_int($harga) && !is_float($harga)) || $harga <= 0) json_error('Harga harus berupa angka positif');
+    if ($stok !== null && (!is_int($stok) || $stok < 0)) json_error('Stok harus berupa bilangan bulat dan tidak boleh negatif');
 
     try {
         $pdo = get_db_connection();
@@ -79,6 +77,8 @@ function admin_menu_update($id) {
 
     $body = get_json_body();
 
+    $fields = [];
+    $params = [];
     // Validasi per field supaya harga/is_active tidak bisa jadi nilai rusak.
     foreach (['nama', 'deskripsi', 'kategori', 'harga', 'image_url', 'is_active'] as $key) {
         if (!array_key_exists($key, $body)) continue;
@@ -100,21 +100,14 @@ function admin_menu_update($id) {
         } elseif ($key === 'is_active') {
             if (!is_bool($value) && $value !== 0 && $value !== 1) json_error('is_active harus boolean');
         }
+
+        $fields[] = "{$key} = ?";
+        if ($key === 'is_active') $value = (int)(bool)$value;
+        if ($key === 'harga') $value = (int)$value;
+        $params[] = $value;
     }
 
-    $fields = [];
-    $params = [];
-    foreach (['nama', 'deskripsi', 'kategori', 'harga', 'image_url', 'is_active'] as $key) {
-        if (array_key_exists($key, $body)) {
-            $fields[] = "{$key} = ?";
-            $value = $body[$key];
-            if ($key === 'is_active') $value = (int)(bool)$value;
-            if ($key === 'harga') $value = (int)$value;
-            $params[] = $value;
-        }
-    }
-
-    if (empty($fields)) json_error('Tidak ada field yang diperbarui');
+    if (!$fields) json_error('Tidak ada field yang diperbarui');
     $params[] = $id;
 
     try {

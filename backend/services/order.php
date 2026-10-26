@@ -2,6 +2,59 @@
 require_once __DIR__ . '/../db.php';
 require_once __DIR__ . '/midtrans.php';
 
+/* Kelompokkan item pesanan per order_id agar daftar pesanan tidak N+1. */
+function order_items_by_order(PDO $pdo, array $orderIds): array {
+    if (!$orderIds) return [];
+
+    $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT oi.order_id, oi.quantity, oi.price_at_order, m.nama
+         FROM order_items oi
+         JOIN menus m ON m.id = oi.menu_id
+         WHERE oi.order_id IN ($placeholders)
+         ORDER BY oi.id"
+    );
+    $stmt->execute($orderIds);
+
+    $grouped = [];
+    foreach ($stmt->fetchAll() as $item) {
+        $grouped[(int)$item['order_id']][] = [
+            'name' => $item['nama'],
+            'qty' => (int)$item['quantity'],
+            'price' => (int)$item['price_at_order'],
+        ];
+    }
+    return $grouped;
+}
+
+/* Tempelkan item ke tiap order + samakan tipe angka (PDO mengembalikan string). */
+function attach_order_items(PDO $pdo, array $orders): array {
+    if (!$orders) return [];
+
+    $itemsByOrder = order_items_by_order($pdo, array_map(fn($o) => (int)$o['id'], $orders));
+    foreach ($orders as &$order) {
+        $order['id'] = (int)$order['id'];
+        $order['user_id'] = (int)$order['user_id'];
+        $order['total_price'] = (int)$order['total_price'];
+        $order['items'] = $itemsByOrder[$order['id']] ?? [];
+    }
+    return $orders;
+}
+
+/* Kembalikan stok untuk satu atau beberapa order (batal/kedaluwarsa). */
+function refund_order_stock(PDO $pdo, array $orderIds): void {
+    if (!$orderIds) return;
+
+    $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+    $stmt = $pdo->prepare("SELECT menu_id, quantity FROM order_items WHERE order_id IN ($placeholders)");
+    $stmt->execute($orderIds);
+
+    $refund = $pdo->prepare('UPDATE menus SET stok = stok + ? WHERE id = ?');
+    foreach ($stmt->fetchAll() as $item) {
+        $refund->execute([(int)$item['quantity'], (int)$item['menu_id']]);
+    }
+}
+
 // Pembuatan pesanan dalam satu transaksi: lock baris menu (anti oversell),
 // potong stok, simpan order + item, lalu buat token Midtrans.
 function create_order_tx($userId, array $items, $pickupAt, $catatan = null) {
@@ -26,6 +79,7 @@ function create_order_tx($userId, array $items, $pickupAt, $catatan = null) {
 
         $totalPrice = 0;
         $orderItems = [];
+        $deduct = $pdo->prepare('UPDATE menus SET stok = stok - ? WHERE id = ?');
 
         foreach ($merged as $menuId => $quantity) {
             $menu = $menuMap[$menuId] ?? null;
@@ -37,8 +91,6 @@ function create_order_tx($userId, array $items, $pickupAt, $catatan = null) {
 
             $totalPrice += (int)$menu['harga'] * $quantity;
             $orderItems[] = ['menu_id' => $menuId, 'quantity' => $quantity, 'price' => (int)$menu['harga']];
-
-            $deduct = $pdo->prepare('UPDATE menus SET stok = stok - ? WHERE id = ?');
             $deduct->execute([$quantity, $menuId]);
         }
 

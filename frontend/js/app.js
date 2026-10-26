@@ -32,8 +32,8 @@ const ADMIN_ACCOUNT_SUB = ['notifikasi', 'bantuan', 'profilKantin', 'jamOperasio
 
 const ADMIN_ONLY = ['board', 'stock', 'accountAdmin', 'profilKantin', 'jamOperasional'];
 const STUDENT_PAGES = ['menu', 'cart', 'payment', 'success', 'orders', 'tracking', 'accountStudent'];
-const REFRESH_PAGES = ['menu', 'cart', 'payment', 'success', 'orders', 'tracking', 'board', 'stock'];
 const POLL_PAGES = ['menu', 'stock', 'board', 'orders', 'tracking'];
+const REFRESH_PAGES = POLL_PAGES.concat(['cart', 'payment', 'success']);
 
 let PAGE = (document.body && document.body.dataset.page) || 'menu';
 
@@ -308,7 +308,14 @@ const stockLeft = id => {
 /* Backend sudah mengirim pesanan terbaru duluan. */
 const myOrders = () => state.orders;
 const orderById = id => state.orders.find(o => o.id === String(id));
+const lastOrder = () => orderById(state.lastOrderId) || myOrders()[0];
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+function formErrorHtml(message) {
+  return message
+    ? '<div class="field__error" role="alert">' + icon('alert', 15) + '<span>' + esc(message) + '</span></div>'
+    : '';
+}
 
 function toast(msg, ic) {
   const el = $('toast');
@@ -402,19 +409,24 @@ async function enablePush() {
   }
 }
 
+/* Lepas subscription perangkat ini dari akun yang sedang aktif. */
+async function detachPushSubscription() {
+  if (!PUSH_SUPPORTED) return;
+  const registration = await registerServiceWorker();
+  const subscription = await registration.pushManager.getSubscription();
+  if (!subscription) return;
+  try {
+    await api('/push/unsubscribe', { method: 'POST', body: { endpoint: subscription.endpoint } });
+  } catch (e) { /* tetap lepaskan dari perangkat */ }
+  await subscription.unsubscribe();
+}
+
 async function disablePush() {
   if (!PUSH_SUPPORTED || pushBusy) return;
   pushBusy = true;
 
   try {
-    const registration = await registerServiceWorker();
-    const subscription = await registration.pushManager.getSubscription();
-    if (subscription) {
-      try {
-        await api('/push/unsubscribe', { method: 'POST', body: { endpoint: subscription.endpoint } });
-      } catch (e) { /* tetap lepaskan dari perangkat */ }
-      await subscription.unsubscribe();
-    }
+    await detachPushSubscription();
     pushState = 'default';
     renderView();
     toast('Notifikasi push dimatikan.', 'info');
@@ -425,24 +437,10 @@ async function disablePush() {
   }
 }
 
-/* Lepas subscription perangkat ini dari akun yang logout. */
-async function detachPush() {
-  if (!PUSH_SUPPORTED) return;
-  try {
-    const registration = await registerServiceWorker();
-    const subscription = await registration.pushManager.getSubscription();
-    if (!subscription) return;
-    try {
-      await api('/push/unsubscribe', { method: 'POST', body: { endpoint: subscription.endpoint } });
-    } catch (e) { /* tetap lepaskan dari perangkat */ }
-    await subscription.unsubscribe();
-  } catch (e) { /* abaikan */ }
-}
-
 async function doLogout() {
   /* Lepas subscription perangkat ini dulu agar tidak terus menerima push akun yang keluar. */
   await Promise.race([
-    detachPush(),
+    detachPushSubscription().catch(() => {}),
     new Promise(resolve => setTimeout(resolve, 1500))
   ]);
   pushState = PUSH_SUPPORTED ? 'default' : 'unsupported';
@@ -521,8 +519,7 @@ function resetOverlays() {
 }
 
 /* Navigasi antar layar tanpa memuat ulang dokumen: appbar + tabbar tetap. */
-async function goToRoute(page, opts) {
-  opts = opts || {};
+async function goToRoute(page, opts = {}) {
   const target = guardPage(page);
   const replace = !!opts.replace || target !== page;
   const same = target === PAGE;
@@ -573,8 +570,7 @@ async function goToRoute(page, opts) {
   schedulePolling();
 }
 
-function navigate(page, opts) {
-  opts = opts || {};
+function navigate(page, opts = {}) {
   if (opts.params) Object.assign(state, opts.params);
   if (opts.flash) state.flash = opts.flash;
   goToRoute(page, opts);
@@ -597,6 +593,12 @@ const ADMIN_TABS = [
   { route: 'stock', label: 'Menu & Stok', icon: 'box' },
   { route: 'accountAdmin', label: 'Akun', icon: 'user' }
 ];
+const TAB_ALIASES = {
+  cart: ['payment', 'success'],
+  orders: ['tracking'],
+  accountStudent: STUDENT_ACCOUNT_SUB,
+  accountAdmin: ADMIN_ACCOUNT_SUB
+};
 
 function tabsFor() {
   if (!state.role) return [];
@@ -606,6 +608,22 @@ function tabsFor() {
 function kantinName() {
   return (state.profile && state.profile.nama) || 'Kantin Kampus';
 }
+
+const APPBAR_TITLES = {
+  cart: 'Keranjang',
+  payment: 'Pembayaran',
+  success: 'Pesanan Dibuat',
+  orders: 'Pesanan Saya',
+  tracking: 'Lacak Pesanan',
+  accountStudent: 'Akun',
+  accountAdmin: 'Akun',
+  notifikasi: 'Preferensi Notifikasi',
+  bantuan: 'Bantuan',
+  tentang: 'Tentang Kantin',
+  profilKantin: 'Profil Kantin',
+  jamOperasional: 'Jam Operasional'
+};
+const NO_BACK_ROUTES = ['success', 'orders', 'accountStudent', 'accountAdmin'];
 
 function renderAppbar() {
   const bar = $('appbar');
@@ -620,28 +638,6 @@ function renderAppbar() {
     html = '<div class="od-fill"><div class="appbar__sub">' + esc(kantinName()) + '</div>'
       + '<div class="appbar__title">Halo, ' + esc(state.user ? state.user.nama.split(' ')[0] : 'Mahasiswa') + '</div></div>'
       + '<button class="iconbtn iconbtn--end" data-action="go" data-route="cart" aria-label="Keranjang">' + icon('cart', 22) + '</button>';
-  } else if (r === 'cart') {
-    html = stop + '<div class="od-fill"><div class="appbar__title">Keranjang</div></div>';
-  } else if (r === 'payment') {
-    html = stop + '<div class="od-fill"><div class="appbar__title">Pembayaran</div></div>';
-  } else if (r === 'success') {
-    html = '<div class="od-fill"><div class="appbar__title">Pesanan Dibuat</div></div>';
-  } else if (r === 'orders') {
-    html = '<div class="od-fill"><div class="appbar__title">Pesanan Saya</div></div>';
-  } else if (r === 'tracking') {
-    html = stop + '<div class="od-fill"><div class="appbar__title">Lacak Pesanan</div></div>';
-  } else if (r === 'accountStudent' || r === 'accountAdmin') {
-    html = '<div class="od-fill"><div class="appbar__title">Akun</div></div>';
-  } else if (r === 'notifikasi') {
-    html = stop + '<div class="od-fill"><div class="appbar__title">Preferensi Notifikasi</div></div>';
-  } else if (r === 'bantuan') {
-    html = stop + '<div class="od-fill"><div class="appbar__title">Bantuan</div></div>';
-  } else if (r === 'tentang') {
-    html = stop + '<div class="od-fill"><div class="appbar__title">Tentang Kantin</div></div>';
-  } else if (r === 'profilKantin') {
-    html = stop + '<div class="od-fill"><div class="appbar__title">Profil Kantin</div></div>';
-  } else if (r === 'jamOperasional') {
-    html = stop + '<div class="od-fill"><div class="appbar__title">Jam Operasional</div></div>';
   } else if (r === 'board') {
     const pending = state.orders.filter(o => o.status === 'paid').length;
     html = '<div class="od-fill"><div class="appbar__sub">Admin · ' + clockNow() + '</div>'
@@ -651,7 +647,11 @@ function renderAppbar() {
   } else if (r === 'stock') {
     html = '<div class="od-fill"><div class="appbar__title">Menu &amp; Stok</div></div>'
       + '<button class="iconbtn iconbtn--end" data-action="new-menu" aria-label="Tambah menu">' + icon('plus', 22) + '</button>';
+  } else if (APPBAR_TITLES[r]) {
+    html = (NO_BACK_ROUTES.includes(r) ? '' : stop)
+      + '<div class="od-fill"><div class="appbar__title">' + APPBAR_TITLES[r] + '</div></div>';
   }
+
   bar.className = 'appbar appbar--bordered';
   bar.innerHTML = html;
 }
@@ -665,11 +665,7 @@ function renderTabbar() {
   const prevCount = renderTabbar._count;
   renderTabbar._count = count;
   bar.innerHTML = tabs.map(t => {
-    const active = t.route === state.route
-      || (t.route === 'cart' && ['payment', 'success'].includes(state.route))
-      || (t.route === 'orders' && state.route === 'tracking')
-      || (t.route === 'accountStudent' && STUDENT_ACCOUNT_SUB.includes(state.route))
-      || (t.route === 'accountAdmin' && ADMIN_ACCOUNT_SUB.includes(state.route));
+    const active = t.route === state.route || (TAB_ALIASES[t.route] || []).includes(state.route);
     const pop = count > prevCount && prevCount !== undefined;
     const badge = (t.route === 'cart' && count) ? '<span class="tab__badge' + (pop ? ' tab__badge--pop' : '') + '">' + count + '</span>' : '';
     return '<a class="tab" href="' + PAGES[t.route] + '" data-action="go" data-route="' + t.route + '" aria-current="' + (active ? 'page' : 'false') + '">'
@@ -734,9 +730,7 @@ function viewAuth() {
     form = field('email', 'Email terdaftar', 'email', 'budi@kampus.ac.id', '', true);
   }
 
-  const err = state.formError
-    ? '<div class="field__error" role="alert">' + icon('alert', 15) + '<span>' + esc(state.formError) + '</span></div>'
-    : '';
+  const err = formErrorHtml(state.formError);
 
   const primaryLabel = isAdmin ? 'LOGIN ADMIN' : (mode === 'login' ? 'MASUK' : mode === 'register' ? 'DAFTAR' : 'KIRIM LINK RESET');
   const primaryAction = isAdmin ? 'login' : (mode === 'login' ? 'login' : mode === 'register' ? 'register' : 'forgot');
@@ -893,7 +887,7 @@ function viewPayment() {
 }
 
 function viewSuccess() {
-  const o = orderById(state.lastOrderId) || myOrders()[0];
+  const o = lastOrder();
   if (!o) return viewMenu();
   const paid = ['paid', 'ready', 'completed'].includes(o.status);
   const deadline = o.expiresAt ? String(o.expiresAt).slice(11, 16) : null;
@@ -944,7 +938,7 @@ function viewOrders() {
 }
 
 function viewTracking() {
-  const o = orderById(state.lastOrderId) || myOrders()[0];
+  const o = lastOrder();
   if (!o) return viewOrders();
   const cancelled = o.status === 'cancelled';
   const idx = STATUS_ORDER.indexOf(o.status);
@@ -1350,9 +1344,7 @@ function viewMenuForm() {
     + '<input type="file" id="f-menu-camera" accept="image/*" capture="environment" hidden />'
     + '<div class="note" style="padding:0">' + icon('info', 14) + '<span>JPG, PNG, atau WebP, maksimal 5 MB. Foto dari kamera langsung bisa dipakai.</span></div></div>';
 
-  const err = '<div id="menu-form-error">'
-    + (f.error ? '<div class="field__error" role="alert">' + icon('alert', 15) + '<span>' + esc(f.error) + '</span></div>' : '')
-    + '</div>';
+  const err = '<div id="menu-form-error">' + formErrorHtml(f.error) + '</div>';
 
   return '<div class="modal-backdrop" data-action="close-menu-form"></div>'
     + '<form class="modal-sheet" id="menu-form" role="dialog" aria-modal="true" aria-labelledby="menu-form-title" novalidate>'
@@ -1431,11 +1423,7 @@ function resetMenuForm(root) {
 
 function showMenuFormError(message) {
   const box = $('menu-form-error');
-  if (box) {
-    box.innerHTML = message
-      ? '<div class="field__error" role="alert">' + icon('alert', 15) + '<span>' + esc(message) + '</span></div>'
-      : '';
-  }
+  if (box) box.innerHTML = formErrorHtml(message);
 }
 
 /* ---------- Render ---------- */
@@ -1447,18 +1435,19 @@ function enterScreen() {
   enterScreen._t = setTimeout(() => s.classList.remove('is-entering'), 700);
 }
 
+const VIEWS = {
+  auth: viewAuth, menu: viewMenu, cart: viewCart, payment: viewPayment, success: viewSuccess,
+  orders: viewOrders, tracking: viewTracking, accountStudent: viewAccountStudent, accountAdmin: viewAccountAdmin,
+  notifikasi: viewNotifikasi, bantuan: viewBantuan, tentang: viewTentang, profilKantin: viewProfilKantin, jamOperasional: viewJamOperasional,
+  board: viewBoard, stock: viewStock
+};
+
 function renderView() {
-  const map = {
-    auth: viewAuth, menu: viewMenu, cart: viewCart, payment: viewPayment, success: viewSuccess,
-    orders: viewOrders, tracking: viewTracking, accountStudent: viewAccountStudent, accountAdmin: viewAccountAdmin,
-    notifikasi: viewNotifikasi, bantuan: viewBantuan, tentang: viewTentang, profilKantin: viewProfilKantin, jamOperasional: viewJamOperasional,
-    board: viewBoard, stock: viewStock
-  };
   const s = $('screen');
   const top = s ? s.scrollTop : 0;
   state.route = PAGE;
   renderAppbar();
-  s.innerHTML = state.loading ? skeleton() : (map[PAGE] || viewMenu)();
+  s.innerHTML = state.loading ? skeleton() : (VIEWS[PAGE] || viewMenu)();
   renderCartbar();
   renderTabbar();
   renderMenuForm();
@@ -1507,12 +1496,7 @@ async function loadData() {
   }
   if (needs.profile) {
     jobs.push(api('/kantin/profile').then(row => {
-      state.profile = {
-        nama: row.nama || '',
-        lokasi: row.lokasi || '',
-        kontak: row.kontak || '',
-        deskripsi: row.deskripsi || ''
-      };
+      state.profile = mapProfile(row);
       dataLoaded.profile = true;
     }));
   }
@@ -1527,13 +1511,7 @@ async function loadData() {
 
 function setSession(token, user) {
   state.role = user.role === 'admin' ? 'admin' : 'student';
-  state.user = {
-    id: String(user.id),
-    nama: user.nama,
-    nim: user.nim || '',
-    email: user.email,
-    role: user.role
-  };
+  state.user = mapUser(user);
   /* Jangan bawa cache data milik sesi sebelumnya ke akun yang baru login. */
   state.menu = [];
   state.orders = [];
@@ -1547,9 +1525,14 @@ function setSession(token, user) {
   syncPushSubscription();
 }
 
-async function doLogin() {
+function authFormValid() {
   const form = $('authform');
-  if (form && !form.checkValidity()) { form.reportValidity(); return; }
+  if (form && !form.checkValidity()) { form.reportValidity(); return false; }
+  return true;
+}
+
+async function doLogin() {
+  if (!authFormValid()) return;
 
   const isAdmin = state.authRole === 'admin';
   const emailEl = $(isAdmin ? 'f-adminid' : 'f-login');
@@ -1576,8 +1559,7 @@ async function doLogin() {
 }
 
 async function doRegister() {
-  const form = $('authform');
-  if (form && !form.checkValidity()) { form.reportValidity(); return; }
+  if (!authFormValid()) return;
 
   const payload = {
     nim: ($('f-nim') ? $('f-nim').value.trim() : '') || null,
@@ -1982,12 +1964,7 @@ async function saveKantinProfile(btn) {
 
   try {
     const row = await api('/admin/kantin/profile', { method: 'PATCH', body: payload });
-    state.profile = {
-      nama: row.nama || '',
-      lokasi: row.lokasi || '',
-      kontak: row.kontak || '',
-      deskripsi: row.deskripsi || ''
-    };
+    state.profile = mapProfile(row);
     dataLoaded.profile = true;
     renderView();
     toast('Profil kantin disimpan.', 'checkCircle');
@@ -2088,7 +2065,7 @@ function handle(action, el) {
     case 'login': doLogin(); return;
     case 'register': doRegister(); return;
     case 'forgot':
-      if (!$('authform').checkValidity()) { $('authform').reportValidity(); return; }
+      if (!authFormValid()) return;
       state.formError = null;
       toast('Link reset dikirim ke emailmu.', 'checkCircle');
       state.authMode = 'login'; renderView(); return;
@@ -2315,7 +2292,7 @@ async function boot() {
     try {
       const me = await api('/auth/me');
       state.role = me.role === 'admin' ? 'admin' : 'student';
-      state.user = { id: String(me.id), nama: me.nama, nim: me.nim || '', email: me.email, role: me.role };
+      state.user = mapUser(me);
       auth.save(auth.token(), state.user);
     } catch (e) {
       auth.clear();

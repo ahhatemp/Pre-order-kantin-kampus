@@ -4,13 +4,15 @@ require_once __DIR__ . '/../auth.php';
 require_once __DIR__ . '/../db.php';
 require_once __DIR__ . '/../services/kantin_hours.php';
 
+function kantin_profile_fetch(PDO $pdo): array {
+    $profile = $pdo->query('SELECT nama, lokasi, kontak, deskripsi, updated_at FROM kantin_profile WHERE id = 1')->fetch();
+    if (!$profile) json_error('Profil kantin belum diatur', 404);
+    return $profile;
+}
+
 function kantin_profile_get() {
     try {
-        $pdo = get_db_connection();
-        $stmt = $pdo->query('SELECT nama, lokasi, kontak, deskripsi, updated_at FROM kantin_profile WHERE id = 1');
-        $profile = $stmt->fetch();
-        if (!$profile) json_error('Profil kantin belum diatur', 404);
-        json_response($profile);
+        json_response(kantin_profile_fetch(get_db_connection()));
     } catch (PDOException $e) {
         json_error('Gagal mengambil profil kantin', 500);
     }
@@ -51,10 +53,7 @@ function admin_kantin_profile_update() {
         $stmt = $pdo->prepare('UPDATE kantin_profile SET ' . implode(', ', $fields) . ' WHERE id = ?');
         $stmt->execute($params);
 
-        $stmt = $pdo->query('SELECT nama, lokasi, kontak, deskripsi, updated_at FROM kantin_profile WHERE id = 1');
-        $profile = $stmt->fetch();
-        if (!$profile) json_error('Profil kantin belum diatur', 404);
-        json_response($profile);
+        json_response(kantin_profile_fetch($pdo));
     } catch (PDOException $e) {
         json_error('Gagal menyimpan profil kantin', 500);
     }
@@ -105,7 +104,6 @@ function admin_kantin_hours_update() {
     }
     if (count($days) !== 7) json_error('Jam operasional harus berisi 7 hari');
 
-    $pdo = null;
     try {
         $pdo = get_db_connection();
         $pdo->beginTransaction();

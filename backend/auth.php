@@ -1,5 +1,4 @@
 <?php
-require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/helpers.php';
 
 function base64url_encode($data) {
@@ -11,7 +10,7 @@ function base64url_decode($data) {
 }
 
 function jwt_encode(array $payload) {
-    $config = require __DIR__ . '/config.php';
+    $config = config();
     $header = ['alg' => 'HS256', 'typ' => 'JWT'];
     $payload['iat'] = time();
     $payload['exp'] = time() + 12 * 3600; // 12 jam, sama dengan backend lama
@@ -28,7 +27,7 @@ function jwt_encode(array $payload) {
 }
 
 function jwt_decode($token) {
-    $config = require __DIR__ . '/config.php';
+    $config = config();
     $parts = explode('.', $token);
     if (count($parts) !== 3) return null;
 

@@ -11,8 +11,7 @@ const API_BASE = localStorage.getItem('kantin:api') || (function () {
 })();
 const AUTH_KEY = 'kantin:token';
 
-async function api(path, opts) {
-  opts = opts || {};
+async function api(path, opts = {}) {
   const isForm = typeof FormData !== 'undefined' && opts.body instanceof FormData;
   const headers = {};
   if (!isForm) headers['Content-Type'] = 'application/json';
@@ -64,6 +63,25 @@ function menuImage(url) {
   // ponytail: alias untuk 3 seed yang fotonya belum ada; ganti begitu aset asli ditambahkan.
   const alias = { 'mie-ayam.jpg': 'mie-goreng.jpg', 'ayam-bakar.jpg': 'sate-ayam.jpg', 'es-jeruk.jpg': 'es-teh.jpg' };
   return 'assets/' + (alias[name] || name);
+}
+
+function mapUser(user) {
+  return {
+    id: String(user.id),
+    nama: user.nama,
+    nim: user.nim || '',
+    email: user.email,
+    role: user.role
+  };
+}
+
+function mapProfile(row) {
+  return {
+    nama: row.nama || '',
+    lokasi: row.lokasi || '',
+    kontak: row.kontak || '',
+    deskripsi: row.deskripsi || ''
+  };
 }
 
 function mapMenu(row) {

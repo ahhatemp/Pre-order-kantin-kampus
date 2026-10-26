@@ -16,6 +16,8 @@ require_once __DIR__ . '/../controllers/uploads.php';
 require_once __DIR__ . '/../controllers/push.php';
 require_once __DIR__ . '/../controllers/kantin.php';
 
+// Muat konfigurasi lebih awal: zona waktu & .env harus siap sebelum handler.
+config();
 set_cors_headers();
 
 $method = get_request_method();

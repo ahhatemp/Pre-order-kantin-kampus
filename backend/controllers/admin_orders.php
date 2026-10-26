@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../helpers.php';
 require_once __DIR__ . '/../auth.php';
 require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../services/order.php';
 require_once __DIR__ . '/../services/push.php';
 
 function admin_orders_all() {
@@ -24,37 +25,7 @@ function admin_orders_all() {
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
 
-        $orders = $stmt->fetchAll();
-        if (!$orders) json_response([]);
-
-        // Ambil semua item sekaligus, lalu kelompokkan per order (hindari N+1).
-        $ids = array_map(fn($o) => (int)$o['id'], $orders);
-        $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $itemsStmt = $pdo->prepare(
-            "SELECT oi.order_id, oi.quantity, oi.price_at_order, m.nama
-             FROM order_items oi
-             JOIN menus m ON m.id = oi.menu_id
-             WHERE oi.order_id IN ($placeholders)
-             ORDER BY oi.id"
-        );
-        $itemsStmt->execute($ids);
-
-        $itemsByOrder = [];
-        foreach ($itemsStmt->fetchAll() as $item) {
-            $itemsByOrder[(int)$item['order_id']][] = [
-                'name' => $item['nama'],
-                'qty' => (int)$item['quantity'],
-                'price' => (int)$item['price_at_order'],
-            ];
-        }
-
-        foreach ($orders as &$o) {
-            $o['id'] = (int)$o['id'];
-            $o['user_id'] = (int)$o['user_id'];
-            $o['total_price'] = (int)$o['total_price'];
-            $o['items'] = $itemsByOrder[$o['id']] ?? [];
-        }
-        json_response($orders);
+        json_response(attach_order_items($pdo, $stmt->fetchAll()));
     } catch (PDOException $e) {
         json_error('Gagal mengambil daftar pesanan', 500);
     }
@@ -76,11 +47,9 @@ function admin_order_status($id) {
         'ready' => ['completed'],
     ];
 
-    $isValidStatus = false;
-    foreach ($validTransitions as $allowed) {
-        if (in_array($status, $allowed, true)) $isValidStatus = true;
+    if (!in_array($status, array_merge(...array_values($validTransitions)), true)) {
+        json_error("Status \"{$status}\" tidak valid");
     }
-    if (!$isValidStatus) json_error("Status \"{$status}\" tidak valid");
 
     $pdo = get_db_connection();
 
@@ -103,13 +72,7 @@ function admin_order_status($id) {
 
         // Jika cancel, kembalikan stok
         if ($status === 'cancelled' && $order['status'] !== 'cancelled') {
-            $itemsStmt = $pdo->prepare('SELECT menu_id, quantity FROM order_items WHERE order_id = ?');
-            $itemsStmt->execute([$id]);
-
-            $refund = $pdo->prepare('UPDATE menus SET stok = stok + ? WHERE id = ?');
-            foreach ($itemsStmt->fetchAll() as $item) {
-                $refund->execute([(int)$item['quantity'], (int)$item['menu_id']]);
-            }
+            refund_order_stock($pdo, [(int)$id]);
         }
 
         $update = $pdo->prepare('UPDATE orders SET status = ? WHERE id = ?');

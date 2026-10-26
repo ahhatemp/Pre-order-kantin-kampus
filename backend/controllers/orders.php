@@ -10,7 +10,7 @@ require_once __DIR__ . '/../services/kantin_hours.php';
 function orders_create() {
     $me = authenticate();
 
-    $config = require __DIR__ . '/../config.php';
+    $config = config();
     rate_limit('order', $config['rate_limit_order'], 60, 'Terlalu banyak permintaan order. Tunggu 1 menit.');
 
     $body = get_json_body();
@@ -62,7 +62,6 @@ function orders_create() {
         $pending = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE user_id = ? AND status = 'pending' AND expires_at > NOW()");
         $pending->execute([$me['id']]);
 
-        $config = require __DIR__ . '/../config.php';
         if ((int)$pending->fetchColumn() >= $config['order_pending_limit']) {
             json_error('Masih ada pesanan menunggu pembayaran. Selesaikan atau tunggu 10 menit.', 409);
         }
@@ -95,37 +94,7 @@ function orders_my() {
         $pdo = get_db_connection();
         $stmt = $pdo->prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC');
         $stmt->execute([$me['id']]);
-        $orders = $stmt->fetchAll();
-        if (!$orders) json_response([]);
-
-        // Sertakan item pesanan supaya klien tidak perlu fetch satu per order.
-        $ids = array_map(fn($o) => (int)$o['id'], $orders);
-        $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $itemsStmt = $pdo->prepare(
-            "SELECT oi.order_id, oi.quantity, oi.price_at_order, m.nama
-             FROM order_items oi
-             JOIN menus m ON m.id = oi.menu_id
-             WHERE oi.order_id IN ($placeholders)
-             ORDER BY oi.id"
-        );
-        $itemsStmt->execute($ids);
-
-        $itemsByOrder = [];
-        foreach ($itemsStmt->fetchAll() as $item) {
-            $itemsByOrder[(int)$item['order_id']][] = [
-                'name' => $item['nama'],
-                'qty' => (int)$item['quantity'],
-                'price' => (int)$item['price_at_order'],
-            ];
-        }
-
-        foreach ($orders as &$o) {
-            $o['id'] = (int)$o['id'];
-            $o['user_id'] = (int)$o['user_id'];
-            $o['total_price'] = (int)$o['total_price'];
-            $o['items'] = $itemsByOrder[$o['id']] ?? [];
-        }
-        json_response($orders);
+        json_response(attach_order_items($pdo, $stmt->fetchAll()));
     } catch (PDOException $e) {
         json_error('Gagal mengambil riwayat pesanan', 500);
     }

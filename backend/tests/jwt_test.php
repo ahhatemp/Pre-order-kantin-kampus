@@ -4,7 +4,7 @@
 require_once __DIR__ . '/../auth.php';
 require_once __DIR__ . '/../rate_limit.php';
 
-$config = require __DIR__ . '/../config.php';
+$config = config();
 
 $fails = 0;
 function check($label, $cond) {

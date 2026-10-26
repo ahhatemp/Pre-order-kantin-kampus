@@ -1,6 +1,12 @@
 <?php
 // Shared helpers: JSON response, request parsing, CORS
 
+function config() {
+    static $config = null;
+    if ($config === null) $config = require __DIR__ . '/config.php';
+    return $config;
+}
+
 function set_cors_headers() {
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, POST, PATCH, PUT, DELETE, OPTIONS');
@@ -34,8 +40,6 @@ function get_request_method() {
 }
 
 function get_request_path() {
-    $uri = $_SERVER['REQUEST_URI'] ?? '/';
-    $path = parse_url($uri, PHP_URL_PATH);
-    $path = '/' . trim($path, '/');
-    return $path === '/' ? '/' : rtrim($path, '/');
+    $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+    return '/' . trim($path, '/');
 }

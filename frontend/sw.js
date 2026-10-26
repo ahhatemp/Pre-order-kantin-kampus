@@ -6,9 +6,7 @@ self.addEventListener('push', event => {
   let payload = {};
   try {
     payload = event.data ? event.data.json() : {};
-  } catch (e) {
-    payload = {};
-  }
+  } catch (e) { /* payload bukan JSON */ }
 
   event.waitUntil(self.registration.showNotification(payload.title || 'Kantin Kampus', {
     body: payload.body || 'Pesananmu telah siap',

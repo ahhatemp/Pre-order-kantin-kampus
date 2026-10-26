@@ -1,8 +1,8 @@
 <?php
-require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../helpers.php';
 
 function create_snap_token($orderCode, $grossAmount) {
-    $config = require __DIR__ . '/../config.php';
+    $config = config();
     $serverKey = $config['midtrans_server_key'];
 
     if (!$serverKey || strpos($serverKey, 'YOUR_SERVER_KEY') !== false) {
