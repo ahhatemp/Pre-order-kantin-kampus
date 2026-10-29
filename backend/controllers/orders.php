@@ -17,6 +17,11 @@ function orders_create() {
     $items = $body['items'] ?? null;
     $pickupAt = $body['pickup_at'] ?? null;
     $catatan = $body['catatan'] ?? null;
+    $paymentMethod = $body['payment_method'] ?? 'qris';
+
+    if (!is_string($paymentMethod) || !in_array($paymentMethod, ['qris', 'cash'], true)) {
+        json_error('Metode pembayaran tidak valid');
+    }
 
     if (!is_array($items) || count($items) === 0) json_error('Pesanan harus berisi minimal 1 menu');
     if (count($items) > 10) json_error('Maksimal 10 item dalam satu pesanan');
@@ -59,7 +64,7 @@ function orders_create() {
 
     try {
         $pdo = get_db_connection();
-        $pending = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE user_id = ? AND status = 'pending' AND expires_at > NOW()");
+        $pending = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE user_id = ? AND status = 'pending' AND expires_at > NOW() AND COALESCE(payment_type, '') <> 'cash'");
         $pending->execute([$me['id']]);
 
         if ((int)$pending->fetchColumn() >= $config['order_pending_limit']) {
@@ -71,10 +76,11 @@ function orders_create() {
     }
 
     try {
-        $order = create_order_tx($me['id'], $items, date('Y-m-d H:i:s', $pickupTs), $catatan);
+        $order = create_order_tx($me['id'], $items, date('Y-m-d H:i:s', $pickupTs), $catatan, $paymentMethod);
 
-        // Mode demo menandai order langsung paid; beri tahu admin setelah respons terkirim.
-        if (($order['status'] ?? '') === 'paid') {
+        // Beri tahu admin setelah respons terkirim: order demo langsung paid,
+        // order tunai tetap pending sampai dikonfirmasi di kasir.
+        if (($order['status'] ?? '') === 'paid' || ($order['payment_type'] ?? '') === 'cash') {
             register_shutdown_function(fn() => push_notify_new_order($order));
         }
 
@@ -109,34 +115,8 @@ function orders_detail($id) {
         $order = $stmt->fetch();
         if (!$order) json_error('Pesanan tidak ditemukan', 404);
 
-        $items = $pdo->prepare(
-            'SELECT oi.*, m.nama
-             FROM order_items oi
-             JOIN menus m ON oi.menu_id = m.id
-             WHERE oi.order_id = ?'
-        );
-        $items->execute([$id]);
-
-        $order['items'] = $items->fetchAll();
-        json_response(cast_orders([$order])[0]);
+        json_response(attach_order_items($pdo, [$order])[0]);
     } catch (PDOException $e) {
         json_error('Gagal mengambil detail pesanan', 500);
     }
-}
-
-// mysql2 mengirim angka sebagai number, PDO sebagai string -> samakan tipe.
-function cast_orders(array $orders) {
-    foreach ($orders as &$o) {
-        foreach (['id', 'user_id', 'total_price'] as $k) {
-            if (isset($o[$k]) && $o[$k] !== null) $o[$k] = (int)$o[$k];
-        }
-        if (isset($o['items'])) {
-            foreach ($o['items'] as &$it) {
-                foreach (['id', 'order_id', 'menu_id', 'quantity', 'price_at_order'] as $k) {
-                    if (isset($it[$k]) && $it[$k] !== null) $it[$k] = (int)$it[$k];
-                }
-            }
-        }
-    }
-    return $orders;
 }

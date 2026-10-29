@@ -39,7 +39,6 @@ function admin_order_status($id) {
     $status = $body['status'] ?? null;
 
     if (!is_string($status)) json_error('Status wajib diisi');
-    if ($status === 'paid') json_error('Status pembayaran diperbarui otomatis oleh sistem');
 
     $validTransitions = [
         'pending' => ['cancelled'],
@@ -47,7 +46,8 @@ function admin_order_status($id) {
         'ready' => ['completed'],
     ];
 
-    if (!in_array($status, array_merge(...array_values($validTransitions)), true)) {
+    // 'paid' khusus konfirmasi tunai; validasinya butuh data order.
+    if ($status !== 'paid' && !in_array($status, array_merge(...array_values($validTransitions)), true)) {
         json_error("Status \"{$status}\" tidak valid");
     }
 
@@ -63,6 +63,18 @@ function admin_order_status($id) {
         if (!$order) {
             $pdo->rollBack();
             json_error('Pesanan tidak ditemukan', 404);
+        }
+
+        if ($status === 'paid') {
+            if ($order['status'] !== 'pending' || ($order['payment_type'] ?? '') !== 'cash') {
+                $pdo->rollBack();
+                json_error('Status pembayaran QRIS diperbarui otomatis oleh sistem');
+            }
+
+            $pdo->prepare("UPDATE orders SET status = 'paid', payment_status = 'cash', paid_at = COALESCE(paid_at, NOW()) WHERE id = ?")
+                ->execute([$id]);
+            $pdo->commit();
+            json_response(['message' => 'Pembayaran tunai berhasil dikonfirmasi']);
         }
 
         if (!in_array($status, $validTransitions[$order['status']] ?? [], true)) {

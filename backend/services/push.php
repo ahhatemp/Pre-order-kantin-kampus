@@ -12,23 +12,11 @@ function push_vapid_file() {
     return config()['vapid_key_file'];
 }
 
-function push_base64url($data) {
-    return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
-}
-
-function push_base64url_decode($data) {
-    $data = strtr($data, '-_', '+/');
-    $padding = strlen($data) % 4;
-    if ($padding > 0) $data .= str_repeat('=', 4 - $padding);
-    $raw = base64_decode($data, true);
-    return $raw === false ? '' : $raw;
-}
-
 /* Kunci dari PushSubscription.toJSON() berformat base64url.
    p256dh = titik P-256 tanpa kompresi (65 byte, awalan 0x04); auth = 16 byte. */
 function push_subscription_key_valid($value, $expectedBytes) {
     if (!is_string($value) || $value === '' || strlen($value) > 255) return false;
-    $raw = push_base64url_decode($value);
+    $raw = base64url_decode($value);
     if (strlen($raw) !== $expectedBytes) return false;
     if ($expectedBytes === 65 && $raw[0] !== "\x04") return false;
     return true;
@@ -63,8 +51,8 @@ function push_new_ec_key($errorMessage = 'Gagal membuat kunci enkripsi push'): a
 
 /* Enkripsi payload untuk satu subscription (Content-Encoding: aes128gcm). */
 function push_encrypt_payload($payload, $p256dh, $authKey) {
-    $uaPublic = push_base64url_decode($p256dh);
-    $authSecret = push_base64url_decode($authKey);
+    $uaPublic = base64url_decode($p256dh);
+    $authSecret = base64url_decode($authKey);
     if (strlen($uaPublic) !== 65 || $uaPublic[0] !== "\x04") {
         throw new RuntimeException('Kunci p256dh subscription tidak valid');
     }
@@ -137,7 +125,7 @@ function push_vapid_keys() {
 
     $keys = [
         'private_pem' => $privatePem,
-        'public_key' => push_base64url($publicKey),
+        'public_key' => base64url_encode($publicKey),
     ];
 
     $dir = dirname($file);
@@ -194,8 +182,8 @@ function push_vapid_authorization($endpoint) {
     $parts = parse_url($endpoint);
     $audience = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? '');
 
-    $header = push_base64url(json_encode(['typ' => 'JWT', 'alg' => 'ES256']));
-    $payload = push_base64url(json_encode([
+    $header = base64url_encode(json_encode(['typ' => 'JWT', 'alg' => 'ES256']));
+    $payload = base64url_encode(json_encode([
         'aud' => $audience,
         'exp' => time() + 3600,
         'sub' => push_vapid_subject(),
@@ -209,7 +197,7 @@ function push_vapid_authorization($endpoint) {
     $raw = push_der_signature_to_raw($der);
     if ($raw === null) throw new RuntimeException('Signature VAPID tidak valid');
 
-    return 'vapid t=' . $unsigned . '.' . push_base64url($raw) . ', k=' . $keys['public_key'];
+    return 'vapid t=' . $unsigned . '.' . base64url_encode($raw) . ', k=' . $keys['public_key'];
 }
 
 /* Batasi endpoint ke layanan push browser yang dikenal agar tidak menjadi SSRF. */
@@ -323,12 +311,14 @@ function push_send_to_role($role, array $payload) {
     }
 }
 
-/* Beri tahu semua admin bahwa ada pesanan yang sudah dibayar. */
+/* Beri tahu semua admin bahwa ada pesanan baru: sudah dibayar (QRIS) atau tunai. */
 function push_notify_new_order(array $order) {
     $total = (int)($order['total_price'] ?? 0);
+    $isCash = ($order['payment_type'] ?? '') === 'cash';
     push_send_to_role('admin', [
-        'title' => 'Pesanan baru masuk',
-        'body' => 'Pesanan ' . ($order['order_code'] ?? '') . ' sebesar Rp ' . number_format($total, 0, ',', '.') . ' sudah dibayar.',
+        'title' => $isCash ? 'Pesanan tunai baru' : 'Pesanan baru masuk',
+        'body' => 'Pesanan ' . ($order['order_code'] ?? '') . ' sebesar Rp ' . number_format($total, 0, ',', '.')
+            . ($isCash ? ' · bayar tunai di kasir.' : ' sudah dibayar.'),
         'url' => 'admin-pesanan.html',
         'tag' => 'pesanan-baru-' . (int)($order['id'] ?? 0),
     ]);

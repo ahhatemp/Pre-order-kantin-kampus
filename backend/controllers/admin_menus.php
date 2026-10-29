@@ -10,13 +10,7 @@ function admin_menus_all() {
     try {
         $pdo = get_db_connection();
         $menus = $pdo->query('SELECT * FROM menus WHERE deleted_at IS NULL ORDER BY nama ASC')->fetchAll();
-        foreach ($menus as &$m) {
-            $m['id'] = (int)$m['id'];
-            $m['harga'] = (int)$m['harga'];
-            $m['stok'] = (int)$m['stok'];
-            $m['is_active'] = (int)$m['is_active'];
-        }
-        json_response($menus);
+        json_response(array_map(fn($m) => cast_ints($m, ['id', 'harga', 'stok', 'is_active']), $menus));
     } catch (PDOException $e) {
         json_error('Gagal mengambil daftar menu', 500);
     }
@@ -62,10 +56,7 @@ function admin_menu_detail($id) {
         $menu = $stmt->fetch();
         if (!$menu) json_error('Menu tidak ditemukan', 404);
 
-        $menu['id'] = (int)$menu['id'];
-        $menu['harga'] = (int)$menu['harga'];
-        $menu['stok'] = (int)$menu['stok'];
-        json_response($menu);
+        json_response(cast_ints($menu, ['id', 'harga', 'stok']));
     } catch (PDOException $e) {
         json_error('Gagal mengambil detail menu', 500);
     }

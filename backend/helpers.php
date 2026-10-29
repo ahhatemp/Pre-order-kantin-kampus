@@ -43,3 +43,23 @@ function get_request_path() {
     $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
     return '/' . trim($path, '/');
 }
+
+function base64url_encode($data) {
+    return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+}
+
+function base64url_decode($data) {
+    $data = strtr($data, '-_', '+/');
+    $padding = strlen($data) % 4;
+    if ($padding > 0) $data .= str_repeat('=', 4 - $padding);
+    $raw = base64_decode($data, true);
+    return $raw === false ? '' : $raw;
+}
+
+/* PDO mengembalikan angka sebagai string; samakan tipe untuk respons API. */
+function cast_ints(array $row, array $keys) {
+    foreach ($keys as $key) {
+        if (isset($row[$key])) $row[$key] = (int)$row[$key];
+    }
+    return $row;
+}

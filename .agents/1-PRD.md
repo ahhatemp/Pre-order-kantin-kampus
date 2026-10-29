@@ -1,8 +1,9 @@
 # PRD: Sistem Pre-Order Kantin Kampus
 
-> **Status dokumen (v1):** PRD ini sudah diselaraskan dengan implementasi aktual di repo —
-> backend PHP 8 native + PDO/MySQL, frontend HTML/CSS/JS tanpa build step. Rincian teknis
-> ada di `2-TECH-SPEC.md`, status pekerjaan di `3-TASKS.md`.
+> **Status dokumen (v1):** PRD ini sudah diselaraskan dengan implementasi aktual di repo per
+> 2026-10-27 — backend PHP 8 native + PDO/MySQL, frontend HTML/CSS/JS tanpa build step, termasuk
+> Web Push/PWA, profil kantin, dan jam operasional. Rincian teknis ada di `2-TECH-SPEC.md`,
+> status pekerjaan di `3-TASKS.md`.
 
 ## 1. Visi & Tujuan Produk
 
@@ -64,11 +65,15 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 - Sebagai admin kantin, saya ingin mark order as ready, agar user tahu pesannya bisa diambil.
 - Sebagai admin kantin, saya ingin update stok item, agar sistem akurat dan prevent over-order.
 
-### Modul 5: Status Tracking *(v1 — tanpa push notification)*
+### Modul 5: Status Tracking *(v1)*
 - Sebagai mahasiswa, saya ingin status pesanan ter-update otomatis saat halaman tracking dibuka, agar tahu pesanan sudah siap diambil tanpa refresh manual.
 - Sebagai mahasiswa, saya ingin melihat slot pickup time, agar tahu kapan harus datang ke kantin.
+- Sebagai mahasiswa, saya ingin menerima notifikasi saat pesanan siap diambil, agar tidak perlu terus membuka aplikasi. *(v1 — Web Push)*
 
-> **Catatan scope v1:** Push notification (FCM/email) tidak diimplementasikan di v1. Pengguna tahu status baru lewat polling otomatis di halaman tracking. Modul notifikasi penuh menjadi v2.
+> **Catatan scope v1:** Web Push untuk status `ready` sudah diimplementasikan (VAPID + service
+> worker di halaman Notifikasi). Halaman tracking tetap menyegarkan data lewat polling otomatis
+> karena push bergantung pada izin browser dan hanya dikirim saat pesanan siap. Push untuk
+> konfirmasi pembayaran (`paid`) dan kanal email/FCM tetap v2.
 
 ---
 
@@ -126,7 +131,7 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 - **Input:** Item list, `pickup_at` (tanggal + jam), catatan khusus (opsional)
 - **Proses:** Validasi stok dalam transaksi + row lock, potong stok, buat order `pending`, set `expires_at` = sekarang + 10 menit
 - **Output:** Order created beserta `order_code`, total, dan `payment_token`
-- **Aturan:** UI menyediakan slot 12:00–16:00; backend menerima jam 07:00–17:00, minimal 5 menit ke depan, maksimal 7 hari ke depan
+- **Aturan:** Slot pickup mengikuti jam operasional di tabel `kantin_hours` (seed: Senin–Kamis 07:00–16:00, Jumat 07:00–15:00, Sabtu/Minggu tutup). UI menawarkan slot per jam mulai `max(12:00, jam buka)` sampai jam tutup pada hari buka pertama yang masih punya slot; backend menerima pickup minimal 5 menit ke depan, maksimal 7 hari ke depan, dan hanya pada hari serta jam buka.
 
 **FR-09: Add Multiple Items**
 - **Input:** Multiple item IDs dengan qty
@@ -160,13 +165,13 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 - **Input:** Admin dashboard request, filter tanggal opsional (`?pickup_date=`)
 - **Proses:** Query orders, sort by `pickup_at`, sertakan item dan data pemesan
 - **Output:** List orders dengan status (pending, paid, ready, completed, cancelled)
-- **Aturan:** Halaman admin memuat ulang data setiap 30 detik selama terbuka
+- **Aturan:** Halaman admin memuat ulang data setiap 30 detik selama terbuka; API mendukung filter `?pickup_date=`, tetapi UI saat ini menampilkan semua order (tanpa filter tanggal)
 
-**FR-14: Filter Orders by Pickup Time**
-- **Input:** Pickup time selection (12:00, 13:00, dst)
-- **Proses:** Filter orders dengan pickup time tersebut
-- **Output:** List orders untuk jam tersebut
-- **Aturan:** Help admin prepare makanan per slot
+**FR-14: Filter Orders by Status (Admin)**
+- **Input:** Pilihan filter status di papan pesanan (Semua, Perlu disiapkan, Siap diambil, Selesai)
+- **Proses:** Filter daftar order yang sudah dimuat di client berdasarkan `status`
+- **Output:** Daftar order dengan status terpilih, diurutkan dari pesanan terbaru
+- **Aturan:** Papan menampilkan daftar datar (belum dikelompokkan per slot/tanggal) dan menyegarkan data setiap 30 detik
 
 **FR-15: Mark Order as Ready**
 - **Input:** Order ID
@@ -180,25 +185,39 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 - **Output:** Current status (pending, paid, ready, completed) ter-update otomatis
 - **Aturan:** Status final (`completed`/`cancelled`) tidak berubah lagi; halaman tetap menyegarkan data selama terbuka
 
-### Modul 6: Notifikasi *(v2 — tidak dikerjakan di v1)*
+### Modul 6: Notifikasi *(v1 — Web Push pesanan siap; konfirmasi order masih v2)*
 
-**FR-17: Order Confirmation Notification** *(v2)*
+**FR-17: Order Confirmation Notification** *(v2 — tidak dikerjakan di v1)*
 - **Input:** Order created
 - **Proses:** Send push notification (FCM) / email
 - **Output:** User ternotifikasi order diterima
 - **Aturan:** Immediate after payment confirmed
 
-**FR-18: Order Ready Notification** *(v2)*
-- **Input:** Admin mark order ready
-- **Proses:** Send push notification
-- **Output:** User notified order siap diambil
-- **Aturan:** Include pickup time reminder
+**FR-18: Order Ready Notification** *(v1 — Web Push)*
+- **Input:** Admin menandai order `ready`
+- **Proses:** Backend mengirim Web Push berpayload (`title`, `body`, `url`, `tag`) ke seluruh subscription aktif milik pemesan lewat gateway push browser
+- **Output:** Notifikasi "Pesananmu telah siap" muncul; klik membuka halaman pesanan
+- **Aturan:** Subscription disimpan per perangkat dengan validasi endpoint & kunci, pengiriman maksimal `TTL` 24 jam, subscription yang ditolak gateway dihapus. User mengaktifkan notifikasi lewat halaman Notifikasi (izin browser)
 
 **FR-19: Auto-Cancel Order Kedaluwarsa** *(v1)*
 - **Input:** Order dengan status `pending` yang `expires_at` sudah lewat
 - **Proses:** Sweep di sela request API (maksimal sekali per menit) membatalkan order dan mengembalikan stok ke `menus` dalam satu transaksi
 - **Output:** Order berstatus `cancelled`, stok menu pulih
 - **Aturan:** Berlaku 10 menit setelah order dibuat (FR-11); tidak memakai cron/daemon terpisah
+
+### Modul 7: Profil & Jam Operasional Kantin *(v1)*
+
+**FR-20: Lihat Profil Kantin**
+- **Input:** —
+- **Proses:** Query baris tunggal `kantin_profile`
+- **Output:** Nama, lokasi, kontak, dan deskripsi kantin tampil di halaman Tentang, Bantuan, dan header aplikasi
+- **Aturan:** Endpoint publik; data seed awal "Kantin Kampus"
+
+**FR-21: Kelola Profil & Jam Operasional (Admin)**
+- **Input:** Nama (wajib, ≤ 100 karakter), lokasi (≤ 150), kontak (≤ 30), deskripsi (≤ 255); serta 7 baris jam operasional (`day_of_week` 1–7, `is_open`, `open_time`, `close_time` format `HH:MM`)
+- **Proses:** PATCH admin memvalidasi tipe/panjang, keunikan 7 hari, dan `open < close` saat buka; perubahan jam disimpan dalam satu transaksi
+- **Output:** Profil dan jam operasional langsung dipakai frontend (slot pickup) dan halaman admin
+- **Aturan:** Hanya admin; validasi backend menolak jumlah hari ≠ 7, hari duplikat, dan format jam salah
 
 ---
 
@@ -217,6 +236,8 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 - Semua query memakai prepared statement PDO (placeholder `?`) untuk mencegah SQL injection
 - Pembuatan order dibungkus transaksi + `SELECT ... FOR UPDATE` untuk mencegah stok oversell
 - Webhook Midtrans divalidasi dengan `signature_key` dan `gross_amount`
+- Subscription Web Push divalidasi (allowlist host gateway, panjang endpoint, `p256dh` 65 byte,
+  `auth` 16 byte); kunci privat VAPID disimpan di `backend/storage/` yang diblokir `.htaccess`
 
 ### Skalabilitas
 - Target 2000 mahasiswa aktif
@@ -238,7 +259,9 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 ## 6. Out of Scope & Dependensi
 
 ### Out of Scope (Tidak Dikerjakan di V1)
-- **Push notification (FCM/email)** — ditunda ke v2. Di v1 status pesanan dilihat lewat halaman tracking yang menyegarkan data tiap 30 detik.
+- **Push/email konfirmasi order** — ditunda ke v2. Web Push untuk status `ready` sudah ada di v1;
+  konfirmasi pembayaran dan kanal email/FCM belum.
+- **Notifikasi email** — ditunda ke v2; v1 memakai Web Push browser.
 - **Email verifikasi akun** — ditunda ke v2. Registrasi v1 langsung aktif setelah validasi email/NIM.
 - **Reset password via email** — ditunda ke v2 karena belum ada layanan email.
 - **Invoice PDF** — ditunda ke v2. v1 menampilkan rincian order langsung di halaman tracking.
@@ -255,7 +278,9 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 - **Backend** — PHP 8.0+ native tanpa framework, PDO, ekstensi `curl`
 - **Frontend** — HTML + CSS + JavaScript polos, tanpa build step
 - **Web server** — PHP built-in server (development) atau Apache/Laragon (`.htaccess`)
-- **Push notification service** — Firebase Cloud Messaging (FCM) — **v2**, tidak dipakai di v1
+- **Push notification service** — Web Push standar (VAPID ES256 + payload `aes128gcm`) lewat
+  browser Push API, tanpa layanan pihak ketiga. Gateway yang diizinkan: FCM, Mozilla, Apple, WNS.
+  Butuh HTTPS atau localhost.
 - **Hosting** — Cloud provider (AWS/GCP/Railway) — TBD saat deployment
 
 ### Asumsi
@@ -264,4 +289,4 @@ Sistem pre-order kantin kampus yang eliminasi antrian dengan let mahasiswa order
 - Mahasiswa punya e-wallet atau rekening bank untuk bayar
 - Kantin punya 1 admin yang handle sistem (bisa multiple di v2)
 - Menu kantin sudah terstruktur (tidak berubah drastis tiap hari)
-- Kantin buka jam 07:00 - 17:00; frontend menawarkan slot pickup 12:00–16:00 dan backend menolak jam di luar jam operasional
+- Jam operasional kantin diatur admin lewat tabel `kantin_hours` (seed: Senin–Kamis 07:00–16:00, Jumat 07:00–15:00, Sabtu/Minggu tutup); frontend menawarkan slot pickup per jam pada hari buka dan backend menolak jam di luar jam operasional

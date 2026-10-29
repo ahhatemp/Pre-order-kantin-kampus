@@ -47,6 +47,10 @@ const auth = {
 
 /* Gambar dari DB ('nasi_goreng.jpg') dicocokkan ke assets/ ('nasi-goreng.jpg'),
    dan jatuh ke placeholder bila file tidak ada. */
+const IMG_W = 960;
+const IMG_H = 720;
+const DAY_NAMES = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+
 const IMG_FALLBACK = 'data:image/svg+xml;utf8,'
   + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="#eceae4"/>'
     + '<path d="M34 44h28M34 54h28" stroke="#b9b4a8" stroke-width="3" stroke-linecap="round"/></svg>');
@@ -94,19 +98,16 @@ function mapMenu(row) {
     stock: Number(row.stok),
     active: row.is_active === undefined ? true : Number(row.is_active) === 1,
     imageUrl: row.image_url || '',
-    img: menuImage(row.image_url),
-    w: 960,
-    h: 720
+    img: menuImage(row.image_url)
   };
 }
 
 function mapHours(rows) {
-  const names = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
   return (rows || []).map(r => {
     const day = Number(r.day_of_week);
     return {
       day: day,
-      name: r.hari || names[day - 1] || '',
+      name: r.hari || DAY_NAMES[day - 1] || '',
       open: !!r.is_open,
       openAt: String(r.open_time || '07:00').slice(0, 5),
       closeAt: String(r.close_time || '16:00').slice(0, 5)
@@ -131,6 +132,13 @@ function mapOrder(row) {
     pickupDate: String(row.pickup_at || '').slice(0, 10),
     note: row.catatan || '',
     status: row.status,
+    paymentType: row.payment_type || '',
+    paymentChannel: row.payment_channel || '',
+    paymentStatus: row.payment_status || '',
+    fraudStatus: row.fraud_status || '',
+    transactionId: row.transaction_id || '',
+    paidAt: row.paid_at || null,
+    qrUrl: row.qr_url || '',
     createdAt: row.created_at || '',
     time: String(row.created_at || '').slice(11, 16),
     expiresAt: row.expires_at || null

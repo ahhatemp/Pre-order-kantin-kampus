@@ -10,7 +10,7 @@ function sweep_expired_orders() {
         $pdo = get_db_connection();
         $pdo->beginTransaction();
 
-        $expired = $pdo->query("SELECT id FROM orders WHERE status = 'pending' AND expires_at < NOW() FOR UPDATE")->fetchAll();
+        $expired = $pdo->query("SELECT id FROM orders WHERE status = 'pending' AND expires_at < NOW() AND COALESCE(payment_type, '') <> 'cash' FOR UPDATE")->fetchAll();
         if (!$expired) {
             $pdo->commit();
             return 0;

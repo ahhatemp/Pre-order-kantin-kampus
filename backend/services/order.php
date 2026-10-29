@@ -33,9 +33,7 @@ function attach_order_items(PDO $pdo, array $orders): array {
 
     $itemsByOrder = order_items_by_order($pdo, array_map(fn($o) => (int)$o['id'], $orders));
     foreach ($orders as &$order) {
-        $order['id'] = (int)$order['id'];
-        $order['user_id'] = (int)$order['user_id'];
-        $order['total_price'] = (int)$order['total_price'];
+        $order = cast_ints($order, ['id', 'user_id', 'total_price']);
         $order['items'] = $itemsByOrder[$order['id']] ?? [];
     }
     return $orders;
@@ -57,7 +55,11 @@ function refund_order_stock(PDO $pdo, array $orderIds): void {
 
 // Pembuatan pesanan dalam satu transaksi: lock baris menu (anti oversell),
 // potong stok, simpan order + item, lalu buat token Midtrans.
-function create_order_tx($userId, array $items, $pickupAt, $catatan = null) {
+function create_order_tx($userId, array $items, $pickupAt, $catatan = null, $paymentMethod = 'qris') {
+    $isCash = $paymentMethod === 'cash';
+    $isDemo = false;
+    $qrUrl = null;
+
     // Agregasi item dengan menu_id sama agar tidak double-deduct stok
     $merged = [];
     foreach ($items as $item) {
@@ -66,9 +68,10 @@ function create_order_tx($userId, array $items, $pickupAt, $catatan = null) {
     }
 
     $pdo = get_db_connection();
-    $pdo->beginTransaction();
 
     try {
+        $pdo->beginTransaction();
+
         $menuIds = array_keys($merged);
         $placeholders = implode(',', array_fill(0, count($menuIds), '?'));
         $stmt = $pdo->prepare("SELECT id, nama, harga, stok, is_active FROM menus WHERE id IN ($placeholders) AND deleted_at IS NULL FOR UPDATE");
@@ -98,10 +101,13 @@ function create_order_tx($userId, array $items, $pickupAt, $catatan = null) {
         $orderCode = 'ORD-' . strtoupper(bin2hex(random_bytes(4)));
 
         $insertOrder = $pdo->prepare(
-            "INSERT INTO orders (order_code, user_id, total_price, pickup_at, catatan, status, expires_at)
-             VALUES (?, ?, ?, ?, ?, 'pending', DATE_ADD(NOW(), INTERVAL 10 MINUTE))"
+            "INSERT INTO orders (order_code, user_id, total_price, pickup_at, catatan, status, payment_type, payment_status, expires_at)
+             VALUES (?, ?, ?, ?, ?, 'pending', ?, 'pending', " . ($isCash ? '?' : 'DATE_ADD(NOW(), INTERVAL 10 MINUTE)') . ")"
         );
-        $insertOrder->execute([$orderCode, $userId, $totalPrice, $pickupAt, $catatan ?: null]);
+        $insertParams = [$orderCode, $userId, $totalPrice, $pickupAt, $catatan ?: null, $isCash ? 'cash' : 'qris'];
+        // Tunai tidak memakai batas bayar 10 menit; pelunasan di kasir saat pickup.
+        if ($isCash) $insertParams[] = $pickupAt;
+        $insertOrder->execute($insertParams);
         $orderId = (int)$pdo->lastInsertId();
 
         $insertItem = $pdo->prepare('INSERT INTO order_items (order_id, menu_id, quantity, price_at_order) VALUES (?, ?, ?, ?)');
@@ -109,12 +115,24 @@ function create_order_tx($userId, array $items, $pickupAt, $catatan = null) {
             $insertItem->execute([$orderId, $oi['menu_id'], $oi['quantity'], $oi['price']]);
         }
 
-        $snapToken = create_snap_token($orderCode, $totalPrice);
-        // Mode demo tanpa Midtrans: pembayaran dianggap berhasil otomatis,
-        // jadi admin tidak perlu mengonfirmasi pending -> paid secara manual.
-        $isDemo = is_string($snapToken) && strpos($snapToken, 'dummy-') === 0;
-        $updateToken = $pdo->prepare('UPDATE orders SET payment_token = ?, status = ? WHERE id = ?');
-        $updateToken->execute([$snapToken, $isDemo ? 'paid' : 'pending', $orderId]);
+        // Tunai tidak pernah auto-paid; admin mengonfirmasi saat pelanggan membayar.
+        if (!$isCash) {
+            $charge = create_qris_charge($orderCode, $totalPrice);
+            // Mode demo tanpa Midtrans: pembayaran dianggap berhasil otomatis.
+            $isDemo = $charge['demo'];
+            $qrUrl = $charge['qr_url'];
+            $updatePayment = $pdo->prepare(
+                'UPDATE orders SET transaction_id = ?, qr_url = ?, status = ?, payment_status = ?, paid_at = ? WHERE id = ?'
+            );
+            $updatePayment->execute([
+                $charge['transaction_id'],
+                $qrUrl,
+                $isDemo ? 'paid' : 'pending',
+                $isDemo ? 'demo' : 'pending',
+                $isDemo ? date('Y-m-d H:i:s') : null,
+                $orderId,
+            ]);
+        }
 
         $pdo->commit();
 
@@ -126,7 +144,10 @@ function create_order_tx($userId, array $items, $pickupAt, $catatan = null) {
             'id' => $orderId,
             'order_code' => $orderCode,
             'total_price' => $totalPrice,
-            'payment_token' => $snapToken,
+            'payment_method' => $paymentMethod,
+            'payment_type' => $isCash ? 'cash' : 'qris',
+            'payment_status' => $isCash ? 'pending' : ($isDemo ? 'demo' : 'pending'),
+            'qr_url' => $qrUrl,
             'status' => $isDemo ? 'paid' : 'pending',
             'expires_at' => $expiresAt,
         ];

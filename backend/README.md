@@ -46,7 +46,7 @@ backend/
 ├── migrations/*.sql       skema per tabel (dipakai migrate.php)
 ├── schema.sql             skema + data awal (import sekali)
 ├── migrate.php            CLI: apply migrations + seed
-├── storage/uploads/       foto menu hasil upload (runtime)
+├── storage/               runtime: upload, rate limit, vapid.json (ditolak .htaccess)
 └── tests/jwt_test.php     self-check JWT & rate limiter
 ```
 
@@ -100,6 +100,10 @@ Lewat Laragon/Apache: letakkan repo di `C:\laragon\www\` (atau junction), Start 
 lalu `http://kantin.test/frontend/` dan API di `http://kantin.test/backend/api/health`.
 `frontend/js/api.js` otomatis memakai `<origin>/backend/api` bila halaman disajikan
 dari path `/frontend/`.
+
+Akses langsung ke `backend/storage/` ditolak oleh `.htaccess` (kunci VAPID, file rate
+limit, dan upload). Foto menu tetap dilayani lewat `GET /api/uploads/{file}`. Bila server
+mengabaikan `.htaccess`, arahkan `VAPID_KEY_FILE` ke lokasi di luar web root.
 
 Alur: login/daftar simpan JWT di `localStorage`, tiap halaman memuat data sendiri
 (`/menus`, `/orders/me`, `/admin/orders`), status pesanan hanya diubah admin lewat

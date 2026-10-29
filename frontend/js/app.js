@@ -89,10 +89,14 @@ const STATUS = {
 };
 const STATUS_ORDER = ['pending', 'paid', 'ready', 'completed'];
 
+function badge(label, color, ic) {
+  return '<span class="badge" style="color:' + color + ';background:color-mix(in srgb,' + color + ' 14%,transparent)">'
+    + icon(ic, 13) + '<span>' + label + '</span></span>';
+}
+
 function statusBadge(status) {
   const m = STATUS[status];
-  return '<span class="badge" style="color:' + m.color + ';background:color-mix(in srgb,' + m.color + ' 14%,transparent)">'
-    + icon(m.icon, 13) + '<span>' + m.label + '</span></span>';
+  return badge(m.label, m.color, m.icon);
 }
 
 /* Kategori diambil dari data menu di server. */
@@ -102,7 +106,6 @@ function categories() {
   return ['Semua'].concat(set);
 }
 
-const DAY_NAMES = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
 const SLOT_TIMES = ['12:00', '13:00', '14:00', '15:00', '16:00'];
 const SLOT_START = '12:00';
 const MIN_PICKUP_LEAD = 5; // menit; samakan dengan backend/controllers/orders.php
@@ -258,7 +261,7 @@ function defaultState() {
     cart: {},
     pickup: null,
     note: null,
-    payMethod: 'ewallet',
+    payMethod: 'qris',
     lastOrderId: null,
     orders: [],
     boardFilter: 'all',
@@ -309,6 +312,8 @@ const stockLeft = id => {
 const myOrders = () => state.orders;
 const orderById = id => state.orders.find(o => o.id === String(id));
 const lastOrder = () => orderById(state.lastOrderId) || myOrders()[0];
+/* QRIS yang belum dibayar: QR tampil dan statusnya perlu dipantau. */
+const isQrisUnpaid = o => !!o && !!o.qrUrl && o.paymentType !== 'cash' && o.status === 'pending' && o.paymentStatus === 'pending';
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 function formErrorHtml(message) {
@@ -447,6 +452,7 @@ async function doLogout() {
   auth.clear();
   state.role = null; state.user = null; state.cart = {}; state.pickup = null;
   state.authMode = 'login'; state.formError = null;
+  clearSessionData();
   navigate('auth', { replace: true, flash: { msg: 'Kamu sudah keluar.', ic: 'logout' } });
 }
 
@@ -642,8 +648,7 @@ function renderAppbar() {
     const pending = state.orders.filter(o => o.status === 'paid').length;
     html = '<div class="od-fill"><div class="appbar__sub">Admin · ' + clockNow() + '</div>'
       + '<div class="appbar__title">Pesanan Masuk</div></div>'
-      + '<span class="badge" style="color:var(--status-paid);background:color-mix(in srgb,var(--status-paid) 14%,transparent)">'
-      + icon('bell', 13) + '<span>' + pending + ' perlu disiapkan</span></span>';
+      + badge(pending + ' perlu disiapkan', 'var(--status-paid)', 'bell');
   } else if (r === 'stock') {
     html = '<div class="od-fill"><div class="appbar__title">Menu &amp; Stok</div></div>'
       + '<button class="iconbtn iconbtn--end" data-action="new-menu" aria-label="Tambah menu">' + icon('plus', 22) + '</button>';
@@ -693,19 +698,17 @@ function renderCartbar() {
 
 /* ---------- Views ---------- */
 function field(id, label, type, placeholder, value, required) {
-  return '<div class="field">'
-    + '<label class="field__label" for="f-' + id + '">' + label + (required ? ' <span class="field__req" aria-hidden="true">*</span>' : '') + '</label>'
-    + (type === 'password'
-      ? '<div class="pass-wrap">'
-      + '<input class="input" id="f-' + id + '" name="' + id + '" type="password" placeholder="' + placeholder + '"'
-      + (value ? ' value="' + esc(value) + '"' : '')
-      + (required ? ' required aria-required="true"' : '') + ' autocomplete="off" />'
+  const attrs = 'class="input" id="f-' + id + '" name="' + id + '" placeholder="' + placeholder + '"'
+    + (value ? ' value="' + esc(value) + '"' : '')
+    + (required ? ' required aria-required="true"' : '') + ' autocomplete="off"';
+  const input = type === 'password'
+    ? '<div class="pass-wrap"><input ' + attrs + ' type="password" />'
       + '<button type="button" class="pass-peek" data-action="toggle-pass" aria-pressed="false" aria-label="Tampilkan password">' + icon('eye', 18) + '</button>'
       + '</div>'
-      : '<input class="input" id="f-' + id + '" name="' + id + '" type="' + type + '" placeholder="' + placeholder + '"'
-      + (value ? ' value="' + esc(value) + '"' : '')
-      + (required ? ' required aria-required="true"' : '') + ' autocomplete="off" />')
-    + '</div>';
+    : '<input ' + attrs + ' type="' + type + '" />';
+  return '<div class="field">'
+    + '<label class="field__label" for="f-' + id + '">' + label + (required ? ' <span class="field__req" aria-hidden="true">*</span>' : '') + '</label>'
+    + input + '</div>';
 }
 
 function viewAuth() {
@@ -758,6 +761,15 @@ function viewAuth() {
     + '</div>';
 }
 
+/* Kartu kosong bersama: ikon, judul, keterangan, dan aksi opsional. */
+function emptyState(ic, title, desc, pad, action) {
+  return '<div class="empty"' + (pad ? ' style="padding-top:var(--space-' + pad + ')"' : '') + '>'
+    + '<div class="empty__ic">' + icon(ic, 26) + '</div>'
+    + '<div><div style="font-weight:600;color:var(--foreground)">' + title + '</div>'
+    + '<div style="font-size:13px;margin-top:4px">' + desc + '</div></div>'
+    + (action || '') + '</div>';
+}
+
 function viewMenu() {
   const q = state.search.trim().toLowerCase();
   const list = state.menu.filter(i =>
@@ -776,9 +788,7 @@ function viewMenu() {
     + '</div>';
 
   const cards = list.length ? '<div class="menu-grid">' + list.map(dishCard).join('') + '</div>'
-    : '<div class="empty"><div class="empty__ic">' + icon('search', 26) + '</div>'
-      + '<div><div style="font-weight:600;color:var(--foreground)">Menu tidak ditemukan</div>'
-      + '<div style="font-size:13px;margin-top:4px">Coba kata kunci atau kategori lain.</div></div></div>';
+    : emptyState('search', 'Menu tidak ditemukan', 'Coba kata kunci atau kategori lain.');
 
   return hero
     + '<div class="search-wrap" style="margin-top:var(--space-4)">'
@@ -796,10 +806,10 @@ function dishCard(i) {
   const low = !out && i.stock <= 5;
   const stockCls = out ? 'dish__stock--out' : low ? 'dish__stock--low' : '';
   const stockText = out ? 'Habis' : 'Stok ' + i.stock;
-  const stockIc = out ? 'alert' : low ? 'alert' : 'check';
+  const stockIc = out || low ? 'alert' : 'check';
   return '<article class="dish">'
     + '<div class="dish__media">'
-    + '<img class="od-media od-media-cover dish__img" src="' + i.img + '" width="' + i.w + '" height="' + i.h + '" alt="' + esc(i.name) + '" loading="lazy" />'
+    + '<img class="od-media od-media-cover dish__img" src="' + i.img + '" width="' + IMG_W + '" height="' + IMG_H + '" alt="' + esc(i.name) + '" loading="lazy" />'
     + '<span class="dish__stock ' + stockCls + '">' + icon(stockIc, 12) + stockText + '</span>'
     + '</div>'
     + '<div class="dish__body">'
@@ -814,15 +824,12 @@ function dishCard(i) {
 function viewCart() {
   const ids = Object.keys(state.cart).filter(id => item(id));
   if (!ids.length) {
-    return '<div class="empty" style="padding-top:var(--space-12)">'
-      + '<div class="empty__ic">' + icon('cart', 26) + '</div>'
-      + '<div><div style="font-weight:600;color:var(--foreground)">Keranjang masih kosong</div>'
-      + '<div style="font-size:13px;margin-top:4px">Pilih menu favoritmu dulu ya.</div></div>'
-      + '<button class="btn btn--primary" data-action="go" data-route="menu">' + icon('utensils', 18) + 'Lihat Menu</button></div>';
+    return emptyState('cart', 'Keranjang masih kosong', 'Pilih menu favoritmu dulu ya.', 12,
+      '<button class="btn btn--primary" data-action="go" data-route="menu">' + icon('utensils', 18) + 'Lihat Menu</button>');
   }
   const lines = ids.map(id => {
     const i = item(id), qty = state.cart[id];
-    return '<div class="line"><img class="line__img" src="' + i.img + '" width="' + i.w + '" height="' + i.h + '" alt="" />'
+    return '<div class="line"><img class="line__img" src="' + i.img + '" width="' + IMG_W + '" height="' + IMG_H + '" alt="" />'
       + '<div class="line__body"><div class="od-row-top" style="--od-gap:6px"><div class="od-fill"><div class="line__name od-clamp-2">' + esc(i.name) + '</div>'
       + '<div class="line__price od-nowrap">' + fmt(i.price) + ' / porsi</div></div>'
       + '<button class="iconbtn iconbtn--end" data-action="remove" data-item="' + id + '" aria-label="Hapus ' + esc(i.name) + '">' + icon('trash', 18) + '</button></div>'
@@ -860,10 +867,10 @@ function viewCart() {
 }
 
 function viewPayment() {
+  const method = state.payMethod === 'cash' ? 'cash' : 'qris';
   const methods = [
-    { id: 'ewallet', name: 'E-Wallet', hint: 'OVO · GoPay · DANA', ic: 'wallet' },
-    { id: 'transfer', name: 'Transfer Bank', hint: 'BCA · Mandiri · BNI', ic: 'card' },
-    { id: 'qris', name: 'QRIS', hint: 'Scan semua e-wallet', ic: 'qr' }
+    { id: 'qris', name: 'QRIS', hint: 'GoPay · DANA · OVO · ShopeePay · m-banking', ic: 'qr' },
+    { id: 'cash', name: 'Tunai', hint: 'Bayar di kasir saat pickup', ic: 'wallet' }
   ];
   return '<div class="card card--section" style="margin-top:var(--space-2)">'
     + '<div class="cartbar__label">Total Bayar</div>'
@@ -873,7 +880,7 @@ function viewPayment() {
     + '</div>'
     + '<div class="section-title">Metode Pembayaran</div>'
     + '<div class="option-list" role="group" aria-label="Metode pembayaran">'
-    + methods.map(m => '<button class="pay" data-action="select-pay" data-method="' + m.id + '" aria-pressed="' + (state.payMethod === m.id) + '">'
+    + methods.map(m => '<button class="pay" data-action="select-pay" data-method="' + m.id + '" aria-pressed="' + (method === m.id) + '">'
       + '<span class="pay__logo">' + icon(m.ic, 20) + '</span>'
       + '<span class="od-fill od-stack" style="--od-gap:2px"><span class="pay__name">' + m.name + '</span>'
       + '<span class="pay__hint">' + m.hint + '</span></span>'
@@ -881,20 +888,30 @@ function viewPayment() {
     + '</div>'
     + '<div class="card" style="padding:var(--space-3);margin-top:var(--space-4);display:flex;gap:var(--space-2);align-items:flex-start">'
     + '<span style="color:var(--foreground-muted);flex:none">' + icon('info', 17) + '</span>'
-    + '<span style="font-size:12.5px;line-height:1.5;color:var(--foreground-secondary)">Pesanan dibatalkan otomatis bila pembayaran tidak selesai dalam 10 menit.</span>'
+    + '<span style="font-size:12.5px;line-height:1.5;color:var(--foreground-secondary)">'
+    + (method === 'cash'
+      ? 'Bayar tunai di kasir saat pickup. Tunjukkan Order ID ke kasir.'
+      : 'Kode QR muncul di halaman pesanan setelah pesanan dibuat. Pesanan dibatalkan otomatis bila pembayaran tidak selesai dalam 10 menit.')
+    + '</span>'
     + '</div>'
-    + '<button class="btn btn--accent btn--lg btn--block" style="margin-top:var(--space-4)" data-action="pay">Bayar Sekarang</button>';
+    + '<button class="btn btn--accent btn--lg btn--block" style="margin-top:var(--space-4)" data-action="pay">'
+    + (method === 'cash' ? 'Pesan & Bayar di Kasir' : 'Bayar Sekarang') + '</button>';
 }
 
 function viewSuccess() {
   const o = lastOrder();
   if (!o) return viewMenu();
+  const isCash = o.paymentType === 'cash';
   const paid = ['paid', 'ready', 'completed'].includes(o.status);
-  const deadline = o.expiresAt ? String(o.expiresAt).slice(11, 16) : null;
+  const deadline = !isCash && o.expiresAt ? String(o.expiresAt).slice(11, 16) : null;
+  const title = paid ? 'Pembayaran Berhasil' : isCash ? 'Pesanan Diterima' : 'Pesanan Dibuat';
+  const subtitle = paid
+    ? 'Pesananmu sudah dibayar dan menunggu disiapkan.'
+    : isCash ? 'Bayar tunai di kasir saat pickup. Tunjukkan Order ID ke kasir.' : 'Menunggu konfirmasi pembayaran.';
   return '<div style="display:grid;place-items:center;gap:var(--space-3);padding:var(--space-8) 0 var(--space-4);text-align:center">'
     + '<div style="width:84px;height:84px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--status-completed) 16%,transparent);color:var(--status-completed)">' + icon('checkCircle', 44) + '</div>'
-    + '<div style="font-family:var(--font-display);font-weight:800;font-size:22px">' + (paid ? 'Pembayaran Berhasil' : 'Pesanan Dibuat') + '</div>'
-    + '<div class="muted" style="font-size:13.5px">' + (paid ? 'Pesananmu sudah dibayar dan menunggu disiapkan.' : 'Menunggu konfirmasi pembayaran.') + '</div>'
+    + '<div style="font-family:var(--font-display);font-weight:800;font-size:22px">' + title + '</div>'
+    + '<div class="muted" style="font-size:13.5px">' + subtitle + '</div>'
     + '</div>'
     + '<div class="card" style="padding:var(--space-5)">'
     + '<div class="summary-row"><span class="muted">Order ID</span><span style="font-weight:600">' + esc(o.code || o.id) + '</span></div>'
@@ -918,14 +935,42 @@ function orderMenuLabel(o) {
   return names.length > 2 ? names.slice(0, 2).join(', ') + ' +' + (names.length - 2) + ' lainnya' : names.join(', ');
 }
 
+function payMethodLabel(o) {
+  const type = o.paymentType || '';
+  if (type === 'qris' || type === 'other_qris') return 'QRIS';
+  if (type === 'cash') return 'Tunai';
+  if (type === 'bank_transfer') return 'Transfer Bank' + (o.paymentChannel ? ' ' + String(o.paymentChannel).toUpperCase() : '');
+  if (type === 'gopay') return 'GoPay';
+  if (type === 'shopeepay') return 'ShopeePay';
+  if (type === 'credit_card') return 'Kartu Kredit';
+  if (type === 'cstore') return o.paymentChannel ? String(o.paymentChannel) : 'Gerai';
+  return type ? type.replace(/_/g, ' ') : '-';
+}
+
+function payStatusLabel(o) {
+  const status = o.paymentStatus || '';
+  if (status === 'settlement') return 'Lunas';
+  if (status === 'capture') return 'Dikonfirmasi';
+  if (status === 'cash') return 'Lunas (tunai)';
+  if (status === 'demo') return 'Lunas (mode demo)';
+  if (status === 'pending') return o.paymentType === 'cash' ? 'Belum dibayar (tunai)' : 'Menunggu pembayaran';
+  if (status === 'expire') return 'Kedaluwarsa';
+  if (status === 'cancel' || status === 'deny') return 'Dibatalkan';
+  if (o.paymentType === 'cash') return o.status === 'cancelled' ? 'Dibatalkan' : 'Belum dibayar (tunai)';
+  return o.status === 'pending' ? 'Menunggu pembayaran' : '-';
+}
+
+function fmtDateTime(value) {
+  if (!value) return '-';
+  const s = String(value);
+  return s.slice(8, 10) + '/' + s.slice(5, 7) + ' ' + s.slice(11, 16);
+}
+
 function viewOrders() {
   const list = myOrders();
   if (!list.length) {
-    return '<div class="empty" style="padding-top:var(--space-12)">'
-      + '<div class="empty__ic">' + icon('receipt', 26) + '</div>'
-      + '<div><div style="font-weight:600;color:var(--foreground)">Belum ada pesanan</div>'
-      + '<div style="font-size:13px;margin-top:4px">Pesanan aktifmu akan muncul di sini.</div></div>'
-      + '<button class="btn btn--primary" data-action="go" data-route="menu">Mulai Pesan</button></div>';
+    return emptyState('receipt', 'Belum ada pesanan', 'Pesanan aktifmu akan muncul di sini.', 12,
+      '<button class="btn btn--primary" data-action="go" data-route="menu">Mulai Pesan</button>');
   }
   return '<div style="margin-top:var(--space-2)">' + list.map(o => {
     return '<button class="order-card" style="width:100%;text-align:left;cursor:pointer;margin-top:var(--space-3)" data-action="order-detail" data-order="' + o.id + '">'
@@ -942,6 +987,7 @@ function viewTracking() {
   if (!o) return viewOrders();
   const cancelled = o.status === 'cancelled';
   const idx = STATUS_ORDER.indexOf(o.status);
+  const isCash = o.paymentType === 'cash';
 
   const steps = STATUS_ORDER.map((s, i) => {
     const m = STATUS[s];
@@ -950,8 +996,8 @@ function viewTracking() {
     const nodeCls = done ? 'tl__node--done' : current ? 'tl__node--current' : '';
     const connCls = done ? 'tl__conn--done' : '';
     const meta = {
-      pending: 'Order dibuat · menunggu pembayaran',
-      paid: 'Pembayaran dikonfirmasi · Rp ' + o.total.toLocaleString('id-ID'),
+      pending: isCash ? 'Order dibuat · bayar tunai saat pickup' : 'Order dibuat · menunggu pembayaran',
+      paid: 'Dibayar' + (o.paidAt ? ' ' + fmtDateTime(o.paidAt) : '') + (o.paymentType ? ' · ' + payMethodLabel(o) : '') + ' · Rp ' + o.total.toLocaleString('id-ID'),
       ready: 'Ambil di counter kantin',
       completed: 'Pesanan sudah diambil'
     }[s];
@@ -968,6 +1014,16 @@ function viewTracking() {
       + '<div style="display:flex;align-items:center;gap:var(--space-2);color:var(--status-cancelled);font-weight:600">' + icon('x', 18) + 'Pesanan Dibatalkan</div></div>'
     : '';
 
+  const qrPending = isQrisUnpaid(o);
+  const qrDeadline = o.expiresAt ? String(o.expiresAt).slice(11, 16) : null;
+  const qrCard = !qrPending ? '' : '<div class="card" style="padding:var(--space-4);margin-top:var(--space-4);text-align:center">'
+    + '<div class="cartbar__label">Scan untuk Membayar</div>'
+    + '<img src="' + esc(o.qrUrl) + '" alt="Kode QRIS pembayaran" style="width:100%;max-width:260px;display:block;margin:var(--space-3) auto;background:#fff;border-radius:12px;padding:10px" />'
+    + '<div class="muted" style="font-size:12.5px">Buka e-wallet atau m-banking, lalu scan QR di atas.</div>'
+    + (qrDeadline ? '<div class="note" style="margin-top:var(--space-3)">' + icon('clock', 14)
+      + '<span>Bayar sebelum pukul ' + esc(qrDeadline) + '. Setelah itu pesanan dibatalkan dan stok kembali.</span></div>' : '')
+    + '</div>';
+
   /* Tombol batal/selesai milik mahasiswa tidak ditampilkan: backend hanya
      mengizinkan admin yang mengubah status pesanan. */
 
@@ -978,13 +1034,23 @@ function viewTracking() {
     + (o.note ? '<div class="note" style="margin-top:var(--space-2)">' + icon('info', 14) + '<span>Catatan: ' + esc(o.note) + '</span></div>' : '')
     + '</div>';
 
+  const hasPayment = !!(o.paymentType || o.paymentStatus || o.paidAt || o.transactionId);
+  const paymentCard = !hasPayment ? '' : '<div class="card" style="padding:var(--space-4);margin-top:var(--space-4)">'
+    + '<div class="cartbar__label" style="margin-bottom:8px">Pembayaran</div>'
+    + '<div class="summary-row"><span class="muted">Metode</span><span>' + esc(payMethodLabel(o)) + '</span></div>'
+    + '<div class="summary-row"><span class="muted">Status</span><span>' + esc(payStatusLabel(o)) + '</span></div>'
+    + (o.paidAt ? '<div class="summary-row"><span class="muted">Waktu bayar</span><span>' + esc(fmtDateTime(o.paidAt)) + '</span></div>' : '')
+    + (o.transactionId ? '<div class="summary-row"><span class="muted">ID transaksi</span><span style="word-break:break-all;text-align:right">' + esc(o.transactionId) + '</span></div>' : '')
+    + '</div>';
+
   return '<div class="od-row" style="margin-top:var(--space-2)"><div class="od-fill"><div class="appbar__sub">Order ID</div>'
     + '<div style="font-family:var(--font-display);font-weight:700;font-size:16px">' + esc(o.code || o.id) + '</div>'
     + '<span class="muted" style="font-size:12px">Ambil ' + esc(pickupLabel(o)) + '</span></div>'
     + statusBadge(o.status) + '</div>'
     + cancelBadge
+    + qrCard
     + '<div class="card" style="padding:var(--space-5);margin-top:var(--space-4)"><div class="timeline">' + steps + '</div></div>'
-    + items;
+    + items + paymentCard;
 }
 
 function accountHeader(name, meta, roleLabel) {
@@ -1026,7 +1092,7 @@ function subpageHead(title, sub) {
 }
 
 function toggleSwitch(on, action, label, disabled, attrs) {
-  return '<button class="toggle" data-action="' + (action || 'toggle-pref') + '"' + (attrs || '')
+  return '<button class="toggle" data-action="' + action + '"' + (attrs || '')
     + ' role="switch" aria-checked="' + (on ? 'true' : 'false') + '" aria-label="' + esc(label) + '"'
     + (disabled ? ' aria-disabled="true" disabled' : '') + '>'
     + '<span class="toggle__track"><span class="toggle__dot"></span></span></button>';
@@ -1161,9 +1227,12 @@ function statBox(label, value, color) {
 
 function orderCardAdmin(o) {
   const items = o.items.map(l => '<span><b>' + esc(l.name) + '</b> × ' + l.qty + '</span>').join('');
+  const cashPending = o.status === 'pending' && o.paymentType === 'cash';
   let actions = '';
   if (o.status === 'pending') {
-    actions = '<span class="muted" style="font-size:12px;align-self:center">Menunggu pembayaran</span>';
+    actions = cashPending
+      ? '<button class="btn btn--primary btn--sm" data-action="admin-cash-paid" data-order="' + o.id + '">' + icon('wallet', 16) + 'Tandai Lunas</button>'
+      : '<span class="muted" style="font-size:12px;align-self:center">Menunggu pembayaran</span>';
   } else if (o.status === 'paid') {
     actions = '<button class="btn btn--primary btn--sm" data-action="admin-ready" data-order="' + o.id + '">' + icon('box', 16) + 'Siap</button>';
   } else if (o.status === 'ready') {
@@ -1171,10 +1240,16 @@ function orderCardAdmin(o) {
   } else {
     actions = '<span class="muted" style="font-size:12px;align-self:center">' + (o.status === 'completed' ? 'Pesanan tuntas' : 'Dibatalkan') + '</span>';
   }
+  const payLine = (o.paymentType || o.paidAt)
+    ? '<span class="muted" style="font-size:11.5px">' + esc(payMethodLabel(o))
+      + (o.paidAt ? ' · bayar ' + esc(fmtDateTime(o.paidAt)) : (cashPending ? ' · belum dibayar' : ''))
+      + '</span>'
+    : '';
   return '<div class="order-card">'
     + '<div class="od-row"><div class="od-fill od-stack" style="--od-gap:2px">'
     + '<span style="font-weight:600;font-size:14px">' + esc(o.buyerName) + '</span>'
-    + '<span class="muted" style="font-size:11.5px">' + o.nim + ' · masuk ' + o.time + ' · ambil ' + esc(pickupLabel(o)) + '</span></div>'
+    + '<span class="muted" style="font-size:11.5px">' + esc(o.nim) + ' · masuk ' + esc(o.time) + ' · ambil ' + esc(pickupLabel(o)) + '</span>'
+    + payLine + '</div>'
     + statusBadge(o.status) + '</div>'
     + '<div class="order-card__items">' + items + '</div>'
     + (o.note ? '<div class="note" style="margin-top:6px">' + icon('info', 14) + '<span>Catatan: ' + esc(o.note) + '</span></div>' : '')
@@ -1250,9 +1325,10 @@ function viewBoard() {
 
   const cards = list.length
     ? list.map(orderCardAdmin).join('')
-    : '<div class="empty" style="padding-top:var(--space-10)"><div class="empty__ic">' + icon('layout', 26) + '</div>'
-      + '<div><div style="font-weight:600;color:var(--foreground)">' + (state.boardFilter === 'all' ? 'Belum ada pesanan masuk' : 'Tidak ada order dengan status ini') + '</div>'
-      + '<div style="font-size:13px;margin-top:4px">' + (state.boardFilter === 'all' ? 'Pesanan baru muncul otomatis di sini.' : 'Coba pilih filter lain.') + '</div></div></div>';
+    : emptyState('layout',
+      state.boardFilter === 'all' ? 'Belum ada pesanan masuk' : 'Tidak ada order dengan status ini',
+      state.boardFilter === 'all' ? 'Pesanan baru muncul otomatis di sini.' : 'Coba pilih filter lain.',
+      10);
 
   return revenueCard(all) + summary + '<div>' + rail + '</div>' + head + cards;
 }
@@ -1271,7 +1347,7 @@ function viewStock() {
       ? '<span class="badge" style="color:var(--foreground-muted);background:var(--background-section)">Nonaktif</span>'
       : out ? '<span class="badge" style="color:var(--status-cancelled);background:color-mix(in srgb,var(--status-cancelled) 14%,transparent)">Habis</span>'
         : low ? '<span class="badge" style="color:var(--status-pending);background:color-mix(in srgb,var(--status-pending) 18%,transparent)">Rendah</span>' : '';
-    return '<div class="stock-row"><img class="stock-row__img" src="' + i.img + '" width="' + i.w + '" height="' + i.h + '" alt="" />'
+    return '<div class="stock-row"><img class="stock-row__img" src="' + i.img + '" width="' + IMG_W + '" height="' + IMG_H + '" alt="" />'
       + '<div class="stock-row__body"><div class="od-row"><div class="od-fill od-stack" style="--od-gap:2px">'
       + '<span style="font-weight:600;font-size:13.5px" class="od-clamp-2">' + esc(i.name) + '</span>'
       + '<span class="muted od-nowrap" style="font-size:12px">' + fmt(i.price) + ' · ' + i.cat + '</span></div>'
@@ -1509,10 +1585,8 @@ async function loadData() {
   await Promise.all(jobs);
 }
 
-function setSession(token, user) {
-  state.role = user.role === 'admin' ? 'admin' : 'student';
-  state.user = mapUser(user);
-  /* Jangan bawa cache data milik sesi sebelumnya ke akun yang baru login. */
+/* Jangan bawa cache data milik sesi sebelumnya ke akun yang baru login. */
+function clearSessionData() {
   state.menu = [];
   state.orders = [];
   state.profile = null;
@@ -1521,6 +1595,12 @@ function setSession(token, user) {
   dataLoaded.orders = false;
   dataLoaded.profile = false;
   dataLoaded.hours = false;
+}
+
+function setSession(token, user) {
+  state.role = user.role === 'admin' ? 'admin' : 'student';
+  state.user = mapUser(user);
+  clearSessionData();
   auth.save(token, state.user);
   syncPushSubscription();
 }
@@ -1589,6 +1669,7 @@ async function doRegister() {
 async function doPay() {
   if (!state.pickup || !cartCount()) return;
 
+  const method = state.payMethod === 'cash' ? 'cash' : 'qris';
   const items = Object.entries(state.cart).map(([id, qty]) => ({ menu_id: Number(id), quantity: qty }));
   const btn = document.querySelector('[data-action="pay"]');
   if (btn) btn.disabled = true;
@@ -1600,6 +1681,7 @@ async function doPay() {
       body: {
         items: items,
         pickup_at: pickup.date + 'T' + pickup.time + ':00',
+        payment_method: method,
         catatan: state.note && state.note.trim() ? state.note.trim() : null
       }
     });
@@ -1617,48 +1699,22 @@ async function doPay() {
 
     const done = (msg, ic) => navigate('success', { replace: true, flash: { msg: msg, ic: ic } });
 
-    let cfg = null;
-    try { cfg = await api('/payments/config'); } catch (e) { /* gateway opsional */ }
-
-    if (!cfg || !cfg.enabled || !res.payment_token || /^dummy-/.test(res.payment_token)) {
-      const paid = res.status === 'paid';
-      done((paid ? 'Pembayaran berhasil · ' : 'Pesanan dibuat · ') + res.order_code, 'checkCircle');
+    if (method === 'cash') {
+      done('Pesanan dibuat · bayar tunai saat pickup', 'info');
       return;
     }
 
-    try { await loadSnap(cfg); } catch (e) {
-      done('Pesanan dibuat, gateway pembayaran gagal dimuat', 'alert');
+    if (res.qr_url && res.status === 'pending') {
+      navigate('tracking', { replace: true, flash: { msg: 'Scan QR untuk membayar · ' + res.order_code, ic: 'qr' } });
       return;
     }
 
-    window.snap.pay(res.payment_token, {
-      onSuccess: () => done('Pembayaran berhasil · ' + res.order_code, 'checkCircle'),
-      onPending: () => done('Pembayaran menunggu penyelesaian · ' + res.order_code, 'info'),
-      onError: () => {
-        toast('Pembayaran gagal. Coba lagi dari halaman Pesanan.', 'alert');
-        navigate('orders');
-      },
-      onClose: () => navigate('orders', { flash: { msg: 'Pembayaran belum selesai', ic: 'info' } })
-    });
+    const paid = res.status === 'paid';
+    done((paid ? 'Pembayaran berhasil · ' : 'Pesanan dibuat · ') + res.order_code, paid ? 'checkCircle' : 'info');
   } catch (e) {
     if (btn) btn.disabled = false;
     toast(e.message, 'alert');
   }
-}
-
-let snapPromise = null;
-function loadSnap(cfg) {
-  if (window.snap) return Promise.resolve();
-  if (snapPromise) return snapPromise;
-  snapPromise = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = (cfg.is_production ? 'https://app.midtrans.com' : 'https://app.sandbox.midtrans.com') + '/snap/snap.js';
-    s.setAttribute('data-client-key', cfg.client_key);
-    s.onload = () => resolve();
-    s.onerror = () => { snapPromise = null; reject(new Error('Gagal memuat Snap')); };
-    document.head.appendChild(s);
-  });
-  return snapPromise;
 }
 
 async function updateOrderStatus(id, status, message) {
@@ -1825,7 +1881,7 @@ function renderCamera() {
   root.hidden = false;
 }
 
-function openCamera() {
+async function openCamera() {
   if (!state.menuForm) return;
   const root = $('camera');
   if (!root || !root.hidden) return;
@@ -1838,30 +1894,34 @@ function openCamera() {
     return;
   }
 
-  navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } }
-  }).then(stream => {
-    if (!state.menuForm || root.hidden) {
-      stream.getTracks().forEach(track => track.stop());
-      return;
-    }
-    cameraStream = stream;
-    const video = $('camera-video');
-    if (!video) { closeCamera(); return; }
-    const enable = () => { const btn = $('camera-shutter'); if (btn) btn.disabled = false; };
-    video.addEventListener('loadedmetadata', enable, { once: true });
-    video.srcObject = stream;
-    const played = video.play();
-    if (played && played.catch) played.catch(() => {});
-    if (video.readyState >= 1) enable();
-  }).catch(err => {
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } }
+    });
+  } catch (err) {
     closeCamera();
     const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
     fallbackCamera(denied
       ? 'Izin kamera ditolak. Gunakan tombol Upload untuk memilih foto.'
       : 'Kamera tidak tersedia di perangkat ini.');
-  });
+    return;
+  }
+
+  if (!state.menuForm || root.hidden) {
+    stream.getTracks().forEach(track => track.stop());
+    return;
+  }
+  cameraStream = stream;
+  const video = $('camera-video');
+  if (!video) { closeCamera(); return; }
+  const enable = () => { const btn = $('camera-shutter'); if (btn) btn.disabled = false; };
+  video.addEventListener('loadedmetadata', enable, { once: true });
+  video.srcObject = stream;
+  const played = video.play();
+  if (played && played.catch) played.catch(() => {});
+  if (video.readyState >= 1) enable();
 }
 
 function closeCamera() {
@@ -2032,13 +2092,7 @@ function handle(action, el) {
   switch (action) {
     case 'back': back(); return;
     case 'go': navigate(d.route); return;
-    case 'noop': toast('Fitur ini belum tersedia di prototipe.', 'info'); return;
 
-    case 'toggle-pref': {
-      const on = el.getAttribute('aria-checked') === 'true';
-      el.setAttribute('aria-checked', on ? 'false' : 'true');
-      return;
-    }
     case 'save-kantin-profile': saveKantinProfile(el); return;
     case 'toggle-hours': toggleHours(el); return;
     case 'save-kantin-hours': saveKantinHours(el); return;
@@ -2107,12 +2161,11 @@ function handle(action, el) {
       navigate('payment'); return;
     case 'pay': doPay(); return;
     case 'order-detail': state.lastOrderId = String(d.order); navigate('tracking'); return;
-    case 'complete-order':
-    case 'cancel-order':
-      toast('Status pesanan hanya bisa diubah oleh admin kantin.', 'info');
-      return;
 
     case 'admin-filter': state.boardFilter = d.filter; renderView(); return;
+    case 'admin-cash-paid':
+      updateOrderStatus(d.order, 'paid', 'Pembayaran tunai dikonfirmasi.');
+      return;
     case 'admin-ready':
       updateOrderStatus(d.order, 'ready', 'Pesanan ditandai siap diambil.');
       return;
@@ -2262,11 +2315,40 @@ async function refreshData() {
 }
 
 let pollTimer = null;
+let qrisPollTimer = null;
+
 function schedulePolling() {
   clearInterval(pollTimer);
   pollTimer = null;
+  scheduleQrisPolling();
   if (!POLL_PAGES.includes(PAGE)) return;
   pollTimer = setInterval(refreshData, ['board', 'orders', 'tracking'].includes(PAGE) ? 30000 : 60000);
+}
+
+/* Halaman Lacak untuk QRIS yang belum dibayar dicek lebih sering supaya
+   tampilan langsung berubah begitu webhook settlement masuk. */
+function scheduleQrisPolling() {
+  clearInterval(qrisPollTimer);
+  qrisPollTimer = null;
+  if (PAGE !== 'tracking') return;
+
+  const o = lastOrder();
+  if (!isQrisUnpaid(o)) return;
+
+  qrisPollTimer = setInterval(async () => {
+    const cur = lastOrder();
+    if (document.hidden || !isQrisUnpaid(cur)) return;
+    try {
+      const updated = mapOrder(await api('/orders/' + cur.id));
+      const idx = state.orders.findIndex(x => x.id === updated.id);
+      if (idx >= 0) state.orders[idx] = updated; else state.orders.unshift(updated);
+      if (updated.status !== cur.status || updated.paymentStatus !== cur.paymentStatus) {
+        renderView();
+        if (['paid', 'ready', 'completed'].includes(updated.status)) toast('Pembayaran diterima', 'checkCircle');
+        scheduleQrisPolling();
+      }
+    } catch (e) { /* coba lagi pada tick berikutnya */ }
+  }, 5000);
 }
 
 document.addEventListener('visibilitychange', () => {
